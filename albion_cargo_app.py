@@ -154,9 +154,9 @@ class AlbionCargoApp(ctk.CTk):
         self.auth_frame.place(relx=0.5, rely=0.5, anchor="center")
         self.auth_frame.pack_propagate(False)
         
-        title_label = ctk.CTkLabel(self.auth_frame, text="LOGISTICS TERMINAL", font=(self.F_DISPLAY, 28, "bold"), text_color="#ffaa00")
+        title_label = ctk.CTkLabel(self.auth_frame, text="TRANSPORTES", font=(self.F_DISPLAY, 28, "bold"), text_color="#ffaa00")
         title_label.pack(pady=(40, 5))
-        sub_label = ctk.CTkLabel(self.auth_frame, text="Control de Manifiestos y Rutas de Contrabando", font=(self.F_BODY, 14), text_color="#8b9bb4")
+        sub_label = ctk.CTkLabel(self.auth_frame, text="Control de transporte", font=(self.F_BODY, 14), text_color="#8b9bb4")
         sub_label.pack(pady=(0, 30))
         
         lbl_user = ctk.CTkLabel(self.auth_frame, text="Nombre del Personaje:", font=(self.F_BODY, 15, "bold"), text_color="#fff")
@@ -164,13 +164,13 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_username = ctk.CTkEntry(self.auth_frame, placeholder_text="Ej: XitSsoTox", fg_color="#06080c", font=(self.F_BODY, 16), border_color="#21262d")
         self.ent_username.pack(fill="x", padx=45, pady=5)
         
-        lbl_region = ctk.CTkLabel(self.auth_frame, text="Servidor Oficial / Región:", font=(self.F_BODY, 15, "bold"), text_color="#fff")
+        lbl_region = ctk.CTkLabel(self.auth_frame, text="Region del servidor", font=(self.F_BODY, 15, "bold"), text_color="#fff")
         lbl_region.pack(anchor="w", padx=45, pady=(10, 2))
         
         self.sel_region = ctk.CTkOptionMenu(self.auth_frame, values=["Albion West (América)", "Albion East (Asia)", "Albion Europe (Europa)"], fg_color="#06080c", button_color="#1f242c", font=(self.F_BODY, 16))
         self.sel_region.pack(fill="x", padx=45, pady=5)
         
-        lbl_pass = ctk.CTkLabel(self.auth_frame, text="Clave de Encriptación de Datos:", font=(self.F_BODY, 15, "bold"), text_color="#fff")
+        lbl_pass = ctk.CTkLabel(self.auth_frame, text="Contraseña:", font=(self.F_BODY, 15, "bold"), text_color="#fff")
         lbl_pass.pack(anchor="w", padx=45, pady=(10, 2))
         self.ent_password = ctk.CTkEntry(self.auth_frame, placeholder_text="••••••••", show="*", fg_color="#06080c", font=(self.F_BODY, 16), border_color="#21262d")
         self.ent_password.pack(fill="x", padx=45, pady=5)
@@ -232,7 +232,7 @@ class AlbionCargoApp(ctk.CTk):
         self.header_frame.pack(fill="x", padx=25, pady=(20, 10))
         self.header_frame.pack_propagate(False)
         
-        title_txt = f"PILOTO: {self.current_username.upper()} • {self.current_region.upper()}"
+        title_txt = f"Nombre: {self.current_username.upper()} • {self.current_region.upper()}"
         # Entry de solo lectura: se puede seleccionar/copiar pero no editar.
         self.ent_title = ctk.CTkEntry(self.header_frame, width=340, font=(self.F_DISPLAY, 18, "bold"), text_color="#fff",
                                       fg_color="transparent", border_width=0, justify="left")
@@ -263,7 +263,7 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_end_time.pack(side="left", padx=5, pady=15)
 
         # Mochila Manual, Global e Independiente
-        lbl_mochila_section = ctk.CTkLabel(self.top_bar, text="Valor Neto Mochila (Inventario):", font=(self.F_DISPLAY, 14, "bold"), text_color="#00d2ff")
+        lbl_mochila_section = ctk.CTkLabel(self.top_bar, text="Valor  De La Mochila (Inventario):", font=(self.F_DISPLAY, 14, "bold"), text_color="#00d2ff")
         lbl_mochila_section.pack(side="left", padx=(40, 10), pady=15)
         
         self.ent_mochila_global = ctk.CTkEntry(self.top_bar, placeholder_text="0", fg_color="#090d13", font=(self.F_MONO, 14, "bold"), text_color="#00d2ff", width=180)
@@ -276,22 +276,19 @@ class AlbionCargoApp(ctk.CTk):
         self.counters_frame.pack(fill="x", padx=25, pady=15)
         
         self.card_budget = self.create_counter_card(self.counters_frame, "INVERSIÓN ÓRDENES DE COMPRA (+2.5% Setup)", "#ffaa00")
-        self.card_bag_value = self.create_counter_card(self.counters_frame, "VALOR DECLARADO MOCHILA", "#00d2ff")
+        self.card_bag_value = self.create_counter_card(self.counters_frame, "VALOR DE LA MOCHILA", "#00d2ff")
         self.card_status = self.create_counter_card(self.counters_frame, "PROFIT ESTIMADO (MOCHILA - INVERSIÓN)", "#fff")
         self.card_pt = self.create_counter_card(self.counters_frame, "PROFIT FINAL MERCADO NEGRO (-10.5% Imp.)", "#00ff66")
 
-        # Workspace Central
         self.workspace = ctk.CTkFrame(self, fg_color="transparent")
         self.workspace.pack(fill="both", expand=True, padx=25, pady=(10, 25))
         
-        # Panel Izquierdo (Tabla de Ítems)
         self.left_panel = ctk.CTkFrame(self.workspace, fg_color="#0d1117", border_color="#21262d", border_width=1, corner_radius=14)
         self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 15))
         
         table_actions = ctk.CTkFrame(self.left_panel, fg_color="transparent")
         table_actions.pack(fill="x", padx=20, pady=15)
         
-        # Entry de solo lectura para el título del manifiesto (seleccionable/copiable)
         self.lbl_manifest = ctk.CTkEntry(table_actions, width=260, font=(self.F_DISPLAY, 18, "bold"), text_color="#fff",
                                          fg_color="transparent", border_width=0, justify="left")
         self.lbl_manifest.pack(side="left")
@@ -305,7 +302,7 @@ class AlbionCargoApp(ctk.CTk):
         btn_add = ctk.CTkButton(table_actions, text="+ Meter Ítem", fg_color="#00d2ff", text_color="#000", font=(self.F_DISPLAY, 13, "bold"), width=110, command=self.add_item_row)
         btn_add.pack(side="right", padx=5)
         
-        btn_pdf = ctk.CTkButton(table_actions, text="Generar Manifiesto PDF", fg_color="#00ff66", text_color="#000", font=(self.F_DISPLAY, 13, "bold"), width=170, command=self.export_to_pdf)
+        btn_pdf = ctk.CTkButton(table_actions, text="Generar PDF", fg_color="#00ff66", text_color="#000", font=(self.F_DISPLAY, 13, "bold"), width=170, command=self.export_to_pdf)
         btn_pdf.pack(side="right", padx=5)
 
         self.table_scroll = ctk.CTkScrollableFrame(self.left_panel, fg_color="#090d13", corner_radius=10)
@@ -314,10 +311,10 @@ class AlbionCargoApp(ctk.CTk):
         headers_frame = ctk.CTkFrame(self.table_scroll, fg_color="transparent")
         headers_frame.pack(fill="x", pady=(5, 10))
         
-        headers = ["Estado Logística", "Nombre del Ítem", "Calidad", "Cant.", "Tier", "Valor Compra O/C", "Precio Caerleon M/N"]
+        headers = ["Estado", "Nombre del Ítem", "Calidad", "Cant.", "Tier", "Valor Compra O/C", "Precio Caerleon M/N"]
         widths = [130, 210, 130, 60, 70, 130, 130]
         for h, w in zip(headers, widths):
-            lbl = ctk.CTkLabel(headers_frame, text=h, font=(self.F_BODY, 14, "bold"), text_color="#8b9bb4", width=w, anchor="w" if h != "Estado Logística" else "center")
+            lbl = ctk.CTkLabel(headers_frame, text=h, font=(self.F_BODY, 14, "bold"), text_color="#8b9bb4", width=w, anchor="w" if h != "Estado" else "center")
             lbl.pack(side="left", padx=4)
 
         # Panel Derecho (Utilidades Auxiliares)
@@ -325,7 +322,7 @@ class AlbionCargoApp(ctk.CTk):
         self.right_panel.pack(side="right", fill="y")
         self.right_panel.pack_propagate(False)
         
-        lbl_esencias = ctk.CTkLabel(self.right_panel, text="Refino / Precios de Esencias", font=(self.F_DISPLAY, 14, "bold"), text_color="#ffaa00")
+        lbl_esencias = ctk.CTkLabel(self.right_panel, text="Runas, Almas y Reliquias", font=(self.F_DISPLAY, 14, "bold"), text_color="#ffaa00")
         lbl_esencias.pack(pady=(15, 2), padx=15, anchor="w")
         
         self.essence_scroll = ctk.CTkFrame(self.right_panel, fg_color="#090d13", corner_radius=10)
@@ -406,8 +403,6 @@ class AlbionCargoApp(ctk.CTk):
     def create_row_ui(self, db_row=None):
         db_id, status, nombre, calidad, cantidad, tier, valor_oc, precio_mn = db_row if db_row else (None, "checked", "", "Normal", 1, "", 0.0, 0.0)
         
-        # Alternamos el color de fondo de cada fila (zebra striping) para
-        # que sea más fácil seguir una línea con la vista en manifiestos largos.
         row_bg = "#161b22" if len(self.row_inputs) % 2 == 0 else "#12161d"
         row_frame = ctk.CTkFrame(self.table_scroll, fg_color=row_bg, corner_radius=8)
         row_frame.pack(fill="x", pady=5, padx=2)
@@ -460,7 +455,7 @@ class AlbionCargoApp(ctk.CTk):
 
     def activar_fase_venta(self):
         if not self.row_inputs:
-            messagebox.showwarning("Manifiesto Vacío", "No tienes ningún ítem registrado.")
+            messagebox.showwarning("Carga Vacía", "No tienes ningún ítem registrado.")
             return
 
         self.fase_venta_activa = True
@@ -650,9 +645,9 @@ class AlbionCargoApp(ctk.CTk):
 
         # Diálogo para que elijas dónde y cómo guardar
         filename = filedialog.asksaveasfilename(
-            title="Guardar Manifiesto PDF",
+            title="Guardar Carga PDF",
             defaultextension=".pdf",
-            initialfile=f"Manifiesto_{self.current_hub.replace(' ', '_')}.pdf",
+            initialfile=f"Carga{self.current_hub.replace(' ', '_')}.pdf",
             filetypes=[("Archivos PDF", "*.pdf")]
         )
         
@@ -709,13 +704,13 @@ class AlbionCargoApp(ctk.CTk):
         
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.7, 0.8)
-        c.drawString(40, h - 75, f"Piloto: {self.current_username}   |   Servidor: {self.current_region}")
+        c.drawString(40, h - 75, f"Nombre: {self.current_username}   |   Servidor: {self.current_region}")
         
         c.setFillColorRGB(1, 1, 1)
         c.drawString(40, h - 100, f"REGISTRO INICIAL LOGÍSTICA: {start_str} (Local)  /  {start_utc}")
         c.drawString(40, h - 115, f"REGISTRO FINAL LOGÍSTICA: {end_str} (Local)  /  {end_utc}")
         estado_fase = "VENTA MERCADO NEGRO ACTIVA" if self.last_metrics.get("fase_venta_activa") else "FASE DE COMPRA (Venta aún no iniciada)"
-        c.drawString(40, h - 130, f"ESTADO DEL MANIFIESTO: {estado_fase}")
+        c.drawString(40, h - 130, f"ESTADO DE LA CARGA: {estado_fase}")
 
         y = h - 160
 
@@ -739,7 +734,7 @@ class AlbionCargoApp(ctk.CTk):
         y -= 10
 
         # --- TABLA DE ÍTEMS (incluye cancelados y ambas monedas) ---
-        y = draw_section_title(y, "MANIFIESTO DE ÍTEMS (incluye cancelados)")
+        y = draw_section_title(y, "CARGA DE ÍTEMS (incluye cancelados)")
 
         def draw_table_headers(y):
             c.setFillColorRGB(1, 0.66, 0)
@@ -814,7 +809,7 @@ class AlbionCargoApp(ctk.CTk):
         y -= 10
 
         # --- NOTAS / INTELIGENCIA DE ZONA ---
-        y = draw_section_title(y, "INTELIGENCIA DE ZONA / NOTAS")
+        y = draw_section_title(y, "NOTAS Extras")
         nota_texto = self.txt_notes.get("1.0", "end-1c").strip()
         c.setFont("Helvetica", 9)
         c.setFillColorRGB(1, 1, 1)
@@ -831,7 +826,7 @@ class AlbionCargoApp(ctk.CTk):
             y -= 14
 
         c.save()
-        messagebox.showinfo("Manifiesto Exportado", f"Archivo guardado exitosamente en:\n{filename}")
+        messagebox.showinfo("Carga Exportada", f"Archivo guardado exitosamente en:\n{filename}")
 
 if __name__ == "__main__":
     app = AlbionCargoApp()
