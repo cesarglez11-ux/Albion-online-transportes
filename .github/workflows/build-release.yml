@@ -25,3 +25,8 @@ jobs:
     - name: Build with PyInstaller
       run: |
         pyinstaller --onefile albion_cargo_app.py
+        - name: Upload Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: Albion-Cargo-App
+        path: dist/albion_cargo_app  # O el nombre exacto de tu ejecutable en la carpeta dist
