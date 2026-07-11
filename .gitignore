@@ -1,0 +1,21 @@
+# Base de datos local (contiene usuarios/contraseñas e inventario personal)
+albion_cargo.db
+*.db
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
