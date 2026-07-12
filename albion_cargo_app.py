@@ -328,7 +328,7 @@ class AlbionCargoApp(ctk.CTk):
                 self.current_region = region
                 self.is_premium = bool(premium)
                 self.auth_frame.destroy()
-                self.show_main_hud()
+                self.iniciar_hud_seguro()
             else:
                 messagebox.showerror("Error", "Clave incorrecta para ese personaje en esta región.")
         else:
@@ -344,8 +344,26 @@ class AlbionCargoApp(ctk.CTk):
             self.current_region = region
             self.is_premium = False
             self.auth_frame.destroy()
-            self.show_main_hud()
+            self.iniciar_hud_seguro()
         conn.close()
+
+    def iniciar_hud_seguro(self):
+        """
+        Envuelve show_main_hud() en un try/except: si algo falla al armar la
+        pantalla principal, en vez de quedar la ventana "pegada" en silencio,
+        te muestra el error exacto en un popup para poder diagnosticarlo.
+        """
+        try:
+            self.show_main_hud()
+        except Exception as ex:
+            import traceback
+            detalle = traceback.format_exc()
+            print(detalle)
+            messagebox.showerror(
+                "Error al abrir el panel principal",
+                f"Ocurrió un error construyendo la pantalla:\n\n{ex}\n\n"
+                "Mirá la consola/terminal para el detalle completo."
+            )
 
     # ------------------------------------------------------------------ #
     # HUD PRINCIPAL
@@ -548,17 +566,38 @@ class AlbionCargoApp(ctk.CTk):
 
         # Pestañas del panel derecho: separamos Esencias/Notas de las cosas nuevas
         # (refinado, roundtrip, historial) para no amontonar todo en una sola columna.
-        self.right_tabs = ctk.CTkTabview(self.right_panel, fg_color="#0d1117",
-                                          segmented_button_fg_color="#161b22",
-                                          segmented_button_selected_color="#ffaa00",
-                                          segmented_button_selected_hover_color="#fff",
-                                          segmented_button_unselected_color="#161b22",
-                                          text_color="#000", width=360)
-        self.right_tabs.pack(fill="both", expand=True, padx=10, pady=10)
-        tab_general = self.right_tabs.add("General")
-        tab_refino = self.right_tabs.add("Refino")
-        tab_round = self.right_tabs.add("Roundtrip")
-        tab_hist = self.right_tabs.add("Historial")
+        # OJO: se hacen "a mano" con botones + frames en vez de usar CTkTabview,
+        # porque ese widget no existe en versiones viejas de customtkinter y
+        # rompía la app entera al arrancar (quedaba "pegada").
+        tabs_btn_bar = ctk.CTkFrame(self.right_panel, fg_color="transparent")
+        tabs_btn_bar.pack(fill="x", padx=10, pady=(10, 0))
+
+        tabs_container = ctk.CTkFrame(self.right_panel, fg_color="#0d1117")
+        tabs_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        tab_general = ctk.CTkFrame(tabs_container, fg_color="transparent")
+        tab_refino = ctk.CTkFrame(tabs_container, fg_color="transparent")
+        tab_round = ctk.CTkFrame(tabs_container, fg_color="transparent")
+        tab_hist = ctk.CTkFrame(tabs_container, fg_color="transparent")
+        self._tab_frames = {"General": tab_general, "Refino": tab_refino, "Roundtrip": tab_round, "Historial": tab_hist}
+        self._tab_buttons = {}
+
+        def mostrar_tab(nombre):
+            for n, frame in self._tab_frames.items():
+                frame.pack_forget()
+            self._tab_frames[nombre].pack(fill="both", expand=True)
+            for n, btn in self._tab_buttons.items():
+                btn.configure(fg_color="#ffaa00" if n == nombre else "#161b22",
+                               text_color="#000" if n == nombre else "#fff")
+
+        for nombre in ("General", "Refino", "Roundtrip", "Historial"):
+            b = ctk.CTkButton(tabs_btn_bar, text=nombre, width=80, font=(self.F_BODY, 11, "bold"),
+                               fg_color="#161b22", text_color="#fff", hover_color="#33404f",
+                               command=lambda n=nombre: mostrar_tab(n))
+            b.pack(side="left", padx=2)
+            self._tab_buttons[nombre] = b
+
+        mostrar_tab("General")
 
         # --- Tab General: esencias + notas (igual que antes) ---
         lbl_esencias = ctk.CTkLabel(tab_general, text="Runas, Almas y Reliquias", font=(self.F_DISPLAY, 14, "bold"), text_color="#ffaa00")
