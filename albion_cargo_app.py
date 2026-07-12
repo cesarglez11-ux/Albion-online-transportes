@@ -1235,6 +1235,12 @@ class AlbionCargoApp(ctk.CTk):
     # IDEA NUEVA: AVISO DE EXPIRACIÓN DE ÓRDENES DE COMPRA (24H)
     # ------------------------------------------------------------------ #
     def update_oc_expira_label(self):
+        # Blindaje: el reloj en vivo llama a esta función cada segundo, y arranca
+        # a los pocos milisegundos de abrir el HUD -- antes de que existan estos
+        # widgets (se crean más abajo en show_main_hud). Si todavía no están
+        # listos, simplemente no hacemos nada esta vez.
+        if not hasattr(self, "ent_start_time") or not hasattr(self, "lbl_oc_expira"):
+            return
         try:
             inicio = datetime.strptime(self.ent_start_time.get().strip(), "%Y-%m-%d %H:%M")
         except Exception:
