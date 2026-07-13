@@ -4,12 +4,8 @@ import time
 import textwrap
 import shutil
 import csv
-import re
-import json
 import unicodedata
 import urllib.request
-import urllib.parse
-import urllib.error
 from datetime import datetime, timedelta
 import tkinter as tk
 import tkinter.font as tkfont
@@ -88,77 +84,6 @@ ESSENCE_COLS = ["r", "a", "re"]
 # Ventana de expiración de una Orden de Compra en Albion (pedido: aviso de 24h)
 OC_EXPIRA_HORAS = 24
 
-# ------------------------------------------------------------------------ #
-# INTEGRACIÓN CON LA API DE PRECIOS (Albion Online Data Project - AODP)
-# ------------------------------------------------------------------------ #
-# AODP tiene un servidor de datos separado por región. Usamos la misma región
-# que el jugador ya eligió en el login, así no hay que configurar nada aparte.
-REGION_TO_SERVER = {
-    "Albion West (América)": "west",
-    "Albion East (Asia)": "east",
-    "Albion Europe (Europa)": "europe",
-}
-
-# Nombres de ciudad tal como los espera la API (coinciden con los hubs de la app,
-# salvo que la API es sensible a mayúsculas exactas).
-CIUDADES_API = ["Fort Sterling", "Lymhurst", "Bridgewatch", "Martlock", "Thetford", "Caerleon"]
-
-# --------------------------------------------------------------------- #
-# DICCIONARIO DE ÍTEMS: nombre en español (normalizado, sin tildes) -> código
-# interno de Albion. Esto es lo que traduce lo que escribís en "Nombre del
-# Ítem" al ID que entiende la API. Albion tiene miles de ítems con códigos
-# exactos; acá va una lista curada de los más comunes para rutas de
-# transporte/Mercado Negro. SI UN ÍTEM NO FUNCIONA, es porque no está en
-# esta lista todavía -- podés agregarlo vos mismo siguiendo el patrón de
-# abajo (ver la guía "CÓMO AGREGAR MÁS ÍTEMS" en la explicación del chat).
-#
-# El valor es el código BASE (sin el prefijo "T{tier}_"). La app arma el
-# ID final combinando esto con el tier que pusiste en la fila, por ejemplo:
-# nombre="Bolsa", tier="T6" -> "T6_BAG"
-ITEM_ALIASES = {
-    # --- Materiales crudos ---
-    "madera": "WOOD",
-    "fibra": "FIBER",
-    "piedra": "ROCK",
-    "mineral": "ORE",
-    "mena": "ORE",
-    "cuero crudo": "HIDE",
-    "piel": "HIDE",
-    # --- Materiales refinados ---
-    "tabla": "PLANKS",
-    "tablones": "PLANKS",
-    "tela": "CLOTH",
-    "bloque de piedra": "STONEBLOCK",
-    "piedra labrada": "STONEBLOCK",
-    "lingote": "METALBAR",
-    "cuero": "LEATHER",
-    # --- Carga / accesorios ---
-    "bolsa": "BAG",
-    "capa": "CAPEITEM_FW",
-    # --- Pociones y comida (genéricas T4+) ---
-    "pocion de vida": "POTIONHEAL",
-    "pocion de energia": "POTIONENERGY",
-    "estofado": "MEAL_SOUP",
-    "guiso": "MEAL_SOUP",
-    "omelette": "MEAL_OMELETTE",
-    # --- Armas comunes (una mano / dos manos, set genérico) ---
-    "espada": "MAIN_SWORD",
-    "espadon": "2H_CLAYMORE",
-    "daga": "MAIN_DAGGER",
-    "lanza": "MAIN_SPEAR",
-    "hacha": "MAIN_AXE",
-    "martillo": "MAIN_HAMMER",
-    "arco": "2H_LONGBOW",
-    "ballesta": "2H_CROSSBOWLARGE",
-    "vara de fuego": "MAIN_FIRESTAFF",
-    "vara de frost": "MAIN_FROSTSTAFF",
-    "vara de arcano": "MAIN_ARCANESTAFF",
-    "vara sagrada": "MAIN_HOLYSTAFF",
-    "vara amaldecida": "MAIN_CURSEDSTAFF",
-    "vara de naturaleza": "MAIN_NATURESTAFF",
-    "guanteletes": "MAIN_KNUCKLES",
-    "escudo": "OFF_SHIELD",
-}
 
 
 def pick_available_font(candidates, fallback="TkDefaultFont"):
@@ -200,70 +125,13 @@ def cargar_icono_app():
 def normalizar_texto(texto):
     """
     Pasa un texto a minúsculas y le saca los acentos, para poder comparar
-    "Poción" con "pocion" sin que la tilde arruine el match contra
-    ITEM_ALIASES. Ej: "Espadón" -> "espadon".
+    "Poción" con "pocion" sin que la tilde arruine la búsqueda rápida de
+    ítems en la tabla. Ej: "Espadón" -> "espadon".
     """
     texto = texto.strip().lower()
     texto = unicodedata.normalize("NFKD", texto)
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     return texto
-
-
-def resolver_item_id(nombre, tier_texto):
-    """
-    Intenta traducir el nombre libre que el jugador escribió en la tabla
-    (ej. "Bolsa", tier "T6") al código interno que usa la API de Albion
-    (ej. "T6_BAG"). Devuelve None si el nombre no está en ITEM_ALIASES o si
-    no se pudo leer el número de tier -- en ese caso simplemente no se
-    puede consultar precio para esa fila (no rompe nada, solo se salta).
-    """
-    nombre_norm = normalizar_texto(nombre)
-    if nombre_norm not in ITEM_ALIASES:
-        return None
-
-    match_tier = re.search(r"(\d+)", str(tier_texto))
-    if not match_tier:
-        return None
-    tier_num = int(match_tier.group(1))
-    if tier_num < 1 or tier_num > 8:
-        return None
-
-    codigo_base = ITEM_ALIASES[nombre_norm]
-
-    # Si el campo tier trae un enchant tipo "T6.1" o "T6@1", lo agregamos con
-    # el formato "@N" que usa la API SOLO para equipo (armas/armaduras).
-    # Los materiales (madera, tela, etc.) no usan ese sufijo.
-    match_encant = re.search(r"[.@](\d)", str(tier_texto))
-    es_material = codigo_base in (
-        "WOOD", "FIBER", "ROCK", "ORE", "HIDE", "PLANKS", "CLOTH",
-        "STONEBLOCK", "METALBAR", "LEATHER", "BAG",
-    )
-    if match_encant and not es_material:
-        return f"T{tier_num}_{codigo_base}@{match_encant.group(1)}"
-    return f"T{tier_num}_{codigo_base}"
-
-
-def consultar_precios_api(item_ids, ciudad, servidor, timeout=8):
-    """
-    Llama al endpoint de precios de Albion Online Data Project para una lista
-    de IDs de ítem en una ciudad puntual. Devuelve una lista de dicts (uno
-    por resultado) o lanza una excepción si falla la conexión -- el que la
-    llama se encarga de mostrar el error al usuario, esta función no atrapa
-    nada para que el error real llegue completo.
-    """
-    if not item_ids:
-        return []
-    ids_str = ",".join(item_ids)
-    ids_encoded = urllib.parse.quote(ids_str)
-    ciudad_encoded = urllib.parse.quote(ciudad)
-    url = (
-        f"https://{servidor}.albion-online-data.com/api/v2/stats/prices/"
-        f"{ids_encoded}.json?locations={ciudad_encoded}&qualities=1"
-    )
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read().decode("utf-8")
-    return json.loads(data)
 
 
 def init_db():
@@ -409,9 +277,14 @@ def init_db():
             destino TEXT DEFAULT 'Mercado Negro (Caerleon)',
             ruta_tipo TEXT DEFAULT '',
             costo_transporte REAL DEFAULT 0,
+            valor_mochila REAL DEFAULT 0,
             PRIMARY KEY(user_id, hub)
         )
     ''')
+    cursor.execute("PRAGMA table_info(config_hub)")
+    cols_config_hub = [c[1] for c in cursor.fetchall()]
+    if "valor_mochila" not in cols_config_hub:
+        cursor.execute("ALTER TABLE config_hub ADD COLUMN valor_mochila REAL DEFAULT 0")
     # Config general por usuario (no por hub): guarda cosas que deben
     # persistir entre reinicios de la app sin importar en qué ciudad estés,
     # como la hora de "Inicio Carga/Compra" (idea nueva: solo se reinicia
@@ -434,6 +307,30 @@ def init_db():
             inversion REAL,
             venta_neta REAL,
             profit_final REAL,
+            FOREIGN KEY(user_id) REFERENCES usuarios(id)
+        )
+    ''')
+
+    # "Banco" (idea nueva): registro permanente de TODO lo que compraste,
+    # incluso después de exportar CSV/PDF (que vacía la tabla activa). Sirve
+    # tanto para el listado de "Todos los Pedidos" como para "Compras con
+    # Profit" y el ranking de Favoritos -- todo sale de esta misma tabla.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS banco_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            hub TEXT,
+            carga_nombre TEXT,
+            nombre TEXT,
+            cantidad INTEGER,
+            tier TEXT,
+            estado TEXT,
+            valor_oc REAL,
+            precio_mn REAL,
+            profit_unidad REAL,
+            profit_total REAL,
+            favorito INTEGER DEFAULT 0,
+            fecha TEXT,
             FOREIGN KEY(user_id) REFERENCES usuarios(id)
         )
     ''')
@@ -845,7 +742,7 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_mochila_global = ctk.CTkEntry(row2, placeholder_text="0", fg_color="#0d111c", font=(self.F_MONO, 14, "bold"), text_color="#48c9dc", width=180)
         self.ent_mochila_global.insert(0, "0")
         self.ent_mochila_global.pack(side="right", padx=5, pady=15)
-        self.ent_mochila_global.bind("<KeyRelease>", lambda e: self.calculate_metrics())
+        self.ent_mochila_global.bind("<KeyRelease>", lambda e: self.guardar_valor_mochila())
 
         # Peso de carga vs. capacidad de montura (idea nueva: logística/riesgo)
         lbl_peso = ctk.CTkLabel(row3, text="Peso Carga (kg):", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
@@ -883,17 +780,6 @@ class AlbionCargoApp(ctk.CTk):
         self.sel_riesgo.pack(side="right", padx=5, pady=15)
         self.lbl_riesgo_mult = ctk.CTkLabel(row3, text="", font=(self.F_MONO, 13, "bold"), text_color="#ef5350")
         self.lbl_riesgo_mult.pack(side="right", padx=(10, 5), pady=15)
-
-        # Alerta de margen mínimo (idea nueva): si el % de ganancia de una
-        # fila cae por debajo de este umbral, su columna "Margen %" se pinta
-        # de rojo como advertencia -- sin necesitar ninguna API externa,
-        # solo comparando lo que VOS ya escribiste en Valor O/C y Precio MN.
-        lbl_margen_min = ctk.CTkLabel(row4, text="⚠ Alerta Margen Mínimo (%):", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
-        lbl_margen_min.pack(side="left", padx=(20, 10), pady=15)
-        self.ent_margen_minimo = ctk.CTkEntry(row4, placeholder_text="15", width=80, fg_color="#0d111c", text_color=ACCENT_GOLD, font=(self.F_MONO, 14, "bold"))
-        self.ent_margen_minimo.insert(0, "15")
-        self.ent_margen_minimo.pack(side="left", padx=5, pady=15)
-        self.ent_margen_minimo.bind("<KeyRelease>", lambda e: self.calculate_metrics())
 
         # Checklist pre-viaje (idea nueva): hábitos rápidos antes de salir.
         self.btn_checklist = ctk.CTkButton(row4, text="✅ Checklist Pre-Viaje", fg_color="#1e2536", hover_color=ACCENT_LIME,
@@ -947,10 +833,10 @@ class AlbionCargoApp(ctk.CTk):
                                          command=self.crear_nueva_carga)
         btn_nueva_carga.pack(side="left", padx=(0, 10))
 
-        self.btn_fase = ctk.CTkButton(table_actions, text="✓ LISTO: PASAR A VENTA M/N", fg_color="#e3a53c", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=210, command=self.activar_fase_venta)
+        self.btn_fase = ctk.CTkButton(table_actions, text="✓ Pasar a Venta", fg_color="#e3a53c", text_color="#12141c", font=(self.F_BODY, 11, "bold"), width=130, height=26, command=self.activar_fase_venta)
         self.btn_fase.pack(side="right", padx=5)
 
-        self.btn_regresar = ctk.CTkButton(table_actions, text="↩ REGRESAR A FASE COMPRA", fg_color="#ef5350", text_color="#eef1f8", font=(self.F_DISPLAY, 12, "bold"), width=210, command=self.regresar_fase_compra)
+        self.btn_regresar = ctk.CTkButton(table_actions, text="✕ Cancelar Venta", fg_color="#ef5350", text_color="#eef1f8", font=(self.F_BODY, 11, "bold"), width=130, height=26, command=self.regresar_fase_compra)
 
         btn_add = ctk.CTkButton(table_actions, text="+ Meter Ítem", fg_color="#48c9dc", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=110, command=self.add_item_row)
         btn_add.pack(side="right", padx=5)
@@ -971,17 +857,6 @@ class AlbionCargoApp(ctk.CTk):
         # Archivar carga al historial (idea nueva: historial de rentabilidad)
         btn_archivar = ctk.CTkButton(table_actions, text="📌 Archivar al Historial", fg_color="#e3a53c", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=190, command=self.archivar_carga)
         btn_archivar.pack(side="right", padx=5)
-
-        # Consultar precios reales en vivo (idea nueva: integración con Albion
-        # Online Data Project). Necesita internet; si falla, avisa con un
-        # popup y no rompe nada más de la app.
-        btn_precios_api = ctk.CTkButton(table_actions, text="🔄 Precios API", fg_color="#48c9dc", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=140, command=self.actualizar_precios_api)
-        btn_precios_api.pack(side="right", padx=5)
-
-        # Comparar el mejor precio de venta entre TODAS las ciudades para los
-        # ítems de la tabla actual (idea propia: comparador entre hubs).
-        btn_comparar = ctk.CTkButton(table_actions, text="🌍 Comparar Ciudades", fg_color="#97a2bd", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=170, command=self.comparar_precios_ciudades)
-        btn_comparar.pack(side="right", padx=5)
 
         # Idea nueva: buscador rápido + contador de ítems por estado. Todo en
         # una segunda fila de herramientas, debajo de los botones de acción.
@@ -1212,13 +1087,13 @@ class AlbionCargoApp(ctk.CTk):
                 self.essence_inputs[f"re_t{t}"].delete(0, "end")
                 self.essence_inputs[f"re_t{t}"].insert(0, str(re))
 
-        # --- Config de destino / ruta / transporte de ESTE hub (persiste siempre, pedido #12) ---
-        cursor.execute("SELECT destino, ruta_tipo, costo_transporte FROM config_hub WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
+        # --- Config de destino / ruta / transporte / mochila de ESTE hub (persiste siempre, pedido #12 y #5) ---
+        cursor.execute("SELECT destino, ruta_tipo, costo_transporte, valor_mochila FROM config_hub WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
         cfg = cursor.fetchone()
         if cfg:
-            destino_guardado, ruta_guardada, costo_guardado = cfg
+            destino_guardado, ruta_guardada, costo_guardado, mochila_guardada = cfg
         else:
-            destino_guardado, ruta_guardada, costo_guardado = DESTINO_MERCADO, "", 0.0
+            destino_guardado, ruta_guardada, costo_guardado, mochila_guardada = DESTINO_MERCADO, "", 0.0, 0.0
 
         self.current_destino = destino_guardado or DESTINO_MERCADO
         self.sel_destino.set(self.current_destino)
@@ -1238,6 +1113,10 @@ class AlbionCargoApp(ctk.CTk):
 
         self.ent_costo_transporte.delete(0, "end")
         self.ent_costo_transporte.insert(0, str(int(costo_guardado)))
+        # Valor de Mochila persistente (idea nueva #5): se recuerda por hub
+        # aunque cierres y abras la app de nuevo.
+        self.ent_mochila_global.delete(0, "end")
+        self.ent_mochila_global.insert(0, str(int(mochila_guardada)))
         self.update_destino_ui()
         self.refresh_manifest_label()
 
@@ -1453,7 +1332,7 @@ class AlbionCargoApp(ctk.CTk):
             # real de cada fila; no tocamos el estado en sí.
             self.aplicar_bloqueo_precio_mn(row)
 
-        self.btn_fase.configure(text="FASE DE VENTA ACTIVA ✓", fg_color="#3ddc84")
+        self.btn_fase.configure(text="Venta Activa ✓", fg_color="#3ddc84")
         self.btn_regresar.pack(side="right", padx=5)
         self.sync_and_calc()
 
@@ -1462,7 +1341,7 @@ class AlbionCargoApp(ctk.CTk):
         for row in self.row_inputs:
             self.aplicar_bloqueo_precio_mn(row)
 
-        self.btn_fase.configure(text="✓ LISTO: PASAR A VENTA M/N", fg_color="#e3a53c")
+        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
         self.btn_regresar.pack_forget()
         self.sync_and_calc()
 
@@ -1636,7 +1515,7 @@ class AlbionCargoApp(ctk.CTk):
         self.current_hub = chosen_hub
         self.current_carga = "Carga 1"
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ LISTO: PASAR A VENTA M/N", fg_color="#e3a53c")
+        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
         self.btn_regresar.pack_forget()
         self.refrescar_selector_cargas()
         self.load_hub_data()
@@ -1670,7 +1549,7 @@ class AlbionCargoApp(ctk.CTk):
     def change_carga(self, nombre):
         self.current_carga = nombre
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ LISTO: PASAR A VENTA M/N", fg_color="#e3a53c")
+        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
         self.btn_regresar.pack_forget()
         self.load_hub_data()
 
@@ -1700,7 +1579,7 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
         self.current_carga = nombre
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ LISTO: PASAR A VENTA M/N", fg_color="#e3a53c")
+        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
         self.btn_regresar.pack_forget()
         self.refrescar_selector_cargas()
         self.load_hub_data()
@@ -1785,20 +1664,22 @@ class AlbionCargoApp(ctk.CTk):
         self.refresh_manifest_label()
         self.calculate_metrics()
 
-    def _guardar_config_hub(self, destino=None, ruta_tipo=None, costo_transporte=None):
+    def _guardar_config_hub(self, destino=None, ruta_tipo=None, costo_transporte=None, valor_mochila=None):
         if destino is None:
             destino = self.current_destino
         if ruta_tipo is None:
             ruta_tipo = self.current_ruta_tipo
         if costo_transporte is None:
             costo_transporte = self.get_float(self.ent_costo_transporte.get()) if hasattr(self, "ent_costo_transporte") else 0.0
+        if valor_mochila is None:
+            valor_mochila = self.get_float(self.ent_mochila_global.get()) if hasattr(self, "ent_mochila_global") else 0.0
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO config_hub (user_id, hub, destino, ruta_tipo, costo_transporte)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, hub) DO UPDATE SET destino=excluded.destino, ruta_tipo=excluded.ruta_tipo, costo_transporte=excluded.costo_transporte
-        ''', (self.current_user_id, self.current_hub, destino, ruta_tipo, costo_transporte))
+            INSERT INTO config_hub (user_id, hub, destino, ruta_tipo, costo_transporte, valor_mochila)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, hub) DO UPDATE SET destino=excluded.destino, ruta_tipo=excluded.ruta_tipo, costo_transporte=excluded.costo_transporte, valor_mochila=excluded.valor_mochila
+        ''', (self.current_user_id, self.current_hub, destino, ruta_tipo, costo_transporte, valor_mochila))
         conn.commit()
         conn.close()
 
@@ -1814,6 +1695,15 @@ class AlbionCargoApp(ctk.CTk):
 
     def save_costo_transporte(self):
         self._guardar_config_hub(costo_transporte=self.get_float(self.ent_costo_transporte.get()))
+        self.calculate_metrics()
+
+    def guardar_valor_mochila(self):
+        """
+        Persiste el "Valor de la Mochila" (idea nueva #5): antes se perdía
+        al cerrar la app; ahora se guarda por hub igual que el resto de la
+        configuración de esa ciudad.
+        """
+        self._guardar_config_hub(valor_mochila=self.get_float(self.ent_mochila_global.get()))
         self.calculate_metrics()
 
     def toggle_premium(self):
@@ -1904,7 +1794,18 @@ class AlbionCargoApp(ctk.CTk):
                 writer.writerow(["Profit Estimado", int(m["profit_est"])])
                 writer.writerow(["Profit Final", int(m["profit_final"])])
             messagebox.showinfo("CSV Exportado", f"Archivo guardado exitosamente en:\n{filename}")
-            # CAMBIO PEDIDO #5: exportar CSV reinicia la hora de Inicio Carga/Compra.
+            # CAMBIO PEDIDO #3 y #5: exportar CSV manda todo al Banco, vacía
+            # la carga activa y reinicia la hora de Inicio Carga/Compra.
+            conn_banco = sqlite3.connect(DB_NAME)
+            cursor_banco = conn_banco.cursor()
+            self._guardar_snapshot_banco(cursor_banco)
+            conn_banco.commit()
+            conn_banco.close()
+            self.vaciar_carga_actual()
+            if hasattr(self, "refrescar_banco_tab"):
+                self.refrescar_banco_tab()
+            if hasattr(self, "refrescar_favoritos_tab"):
+                self.refrescar_favoritos_tab()
             self.reiniciar_inicio_carga()
         except Exception as ex:
             messagebox.showerror("Error CSV", f"No se pudo exportar:\n{ex}")
@@ -2098,165 +1999,6 @@ class AlbionCargoApp(ctk.CTk):
         )
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: INTEGRACIÓN CON LA API DE PRECIOS (Albion Online Data Project)
-    # ------------------------------------------------------------------ #
-    def servidor_api_actual(self):
-        # Usa la región que el jugador eligió al loguearse; si por algo no
-        # está mapeada, cae en "west" por defecto en vez de romper.
-        return REGION_TO_SERVER.get(self.current_region, "west")
-
-    def actualizar_precios_api(self):
-        """
-        Recorre las filas de la tabla actual, intenta resolver el ID de
-        Albion de cada ítem (nombre + tier) y le pregunta a la API el precio
-        de venta más reciente reportado en la ciudad actual. Si lo consigue,
-        actualiza el campo 'Precio de Venta' SOLO si ese campo es editable
-        en este momento (fase de venta activa + estado Recibido) -- si no,
-        deja el dato en un resumen para que lo veas sin tocar nada bloqueado.
-        """
-        if not self.row_inputs:
-            messagebox.showwarning("Tabla Vacía", "No hay ítems cargados para consultar precio.")
-            return
-
-        # Paso 1: resolver qué filas tienen un ítem reconocible.
-        filas_resueltas = []  # (row, item_id)
-        filas_sin_reconocer = []
-        for row in self.row_inputs:
-            if row["status"].get() == "✕ Cancelado":
-                continue
-            item_id = resolver_item_id(row["nombre"].get(), row["tier"].get())
-            if item_id:
-                filas_resueltas.append((row, item_id))
-            else:
-                nombre_mostrado = row["nombre"].get().strip() or "(sin nombre)"
-                if nombre_mostrado not in filas_sin_reconocer:
-                    filas_sin_reconocer.append(nombre_mostrado)
-
-        if not filas_resueltas:
-            messagebox.showinfo(
-                "Sin ítems reconocidos",
-                "Ninguno de los nombres de la tabla está en el diccionario de ítems conocidos.\n\n"
-                "Esta versión reconoce nombres como 'Bolsa', 'Espada', 'Madera', 'Tela', 'Lingote', etc. "
-                "combinados con un tier tipo 'T6'.\n\n"
-                "Si tu ítem no matchea, se puede agregar al diccionario ITEM_ALIASES en el código."
-            )
-            return
-
-        # Paso 2: llamar a la API (una sola llamada con todos los IDs juntos).
-        servidor = self.servidor_api_actual()
-        ids_unicos = list({item_id for _, item_id in filas_resueltas})
-        try:
-            resultados = consultar_precios_api(ids_unicos, self.current_hub, servidor)
-        except urllib.error.URLError:
-            messagebox.showerror(
-                "Sin Conexión",
-                "No se pudo conectar con la API de precios (Albion Online Data Project).\n"
-                "Revisá tu conexión a internet e intentá de nuevo."
-            )
-            return
-        except Exception as ex:
-            messagebox.showerror("Error de API", f"No se pudo consultar la API de precios:\n{ex}")
-            return
-
-        # Paso 3: mapear resultados por item_id (nos quedamos con el más alto
-        # si hay varias entradas de la misma ciudad/calidad).
-        precios_por_id = {}
-        for r in resultados:
-            precio = r.get("sell_price_min", 0)
-            if precio and precio > 0:
-                item_id = r.get("item_id")
-                if item_id not in precios_por_id or precio > precios_por_id[item_id]:
-                    precios_por_id[item_id] = precio
-
-        # Paso 4: aplicar a las filas que se puedan editar, y armar un resumen
-        # de todo lo demás para que el jugador lo revise a mano.
-        actualizados = []
-        solo_informativos = []
-        for row, item_id in filas_resueltas:
-            precio_api = precios_por_id.get(item_id)
-            if not precio_api:
-                continue
-            estado = row["status"].get()
-            editable = self.fase_venta_activa and estado == "✓ Recibido"
-            if editable:
-                row["precio_mn"].configure(state="normal")
-                row["precio_mn"].delete(0, "end")
-                row["precio_mn"].insert(0, str(int(precio_api)))
-                actualizados.append(f"{row['nombre'].get()}: {int(precio_api):,} silver (aplicado)")
-            else:
-                solo_informativos.append(f"{row['nombre'].get()}: {int(precio_api):,} silver (sin aplicar, campo bloqueado)")
-
-        self.sync_and_calc()
-
-        resumen = ""
-        if actualizados:
-            resumen += "PRECIOS APLICADOS:\n" + "\n".join(actualizados) + "\n\n"
-        if solo_informativos:
-            resumen += "SOLO INFORMATIVO (activá fase de venta y marcá Recibido para aplicar):\n" + "\n".join(solo_informativos) + "\n\n"
-        if filas_sin_reconocer:
-            resumen += "NO RECONOCIDOS (agregalos a ITEM_ALIASES si querés):\n" + ", ".join(filas_sin_reconocer)
-        if not resumen:
-            resumen = "La API respondió pero no tenía precios recientes reportados para esta ciudad."
-
-        messagebox.showinfo("Precios de Mercado Actualizados", resumen)
-
-    def comparar_precios_ciudades(self):
-        """
-        Idea propia (comparador entre hubs): para los ítems reconocidos de la
-        tabla actual, consulta el precio de venta en TODAS las ciudades y te
-        dice cuál conviene más para vender, en vez de asumir que la ciudad
-        en la que estás parado es la mejor opción.
-        """
-        if not self.row_inputs:
-            messagebox.showwarning("Tabla Vacía", "No hay ítems cargados para comparar.")
-            return
-
-        ids_a_nombre = {}
-        for row in self.row_inputs:
-            if row["status"].get() == "✕ Cancelado":
-                continue
-            item_id = resolver_item_id(row["nombre"].get(), row["tier"].get())
-            if item_id:
-                ids_a_nombre[item_id] = row["nombre"].get()
-
-        if not ids_a_nombre:
-            messagebox.showinfo("Sin ítems reconocidos", "Ninguno de los ítems de la tabla está en el diccionario conocido.")
-            return
-
-        servidor = self.servidor_api_actual()
-        try:
-            resultados = consultar_precios_api(list(ids_a_nombre.keys()), ",".join(CIUDADES_API), servidor)
-        except urllib.error.URLError:
-            messagebox.showerror("Sin Conexión", "No se pudo conectar con la API de precios. Revisá tu internet.")
-            return
-        except Exception as ex:
-            messagebox.showerror("Error de API", f"No se pudo consultar la API de precios:\n{ex}")
-            return
-
-        # Por cada ítem, nos quedamos con la ciudad de mayor sell_price_min.
-        mejor_por_item = {}
-        for r in resultados:
-            precio = r.get("sell_price_min", 0)
-            if not precio or precio <= 0:
-                continue
-            item_id = r.get("item_id")
-            ciudad = r.get("city")
-            actual = mejor_por_item.get(item_id)
-            if actual is None or precio > actual[1]:
-                mejor_por_item[item_id] = (ciudad, precio)
-
-        if not mejor_por_item:
-            messagebox.showinfo("Sin Datos", "La API no tiene precios recientes reportados para estos ítems en ninguna ciudad.")
-            return
-
-        lineas = []
-        for item_id, nombre in ids_a_nombre.items():
-            if item_id in mejor_por_item:
-                ciudad, precio = mejor_por_item[item_id]
-                lineas.append(f"{nombre}: mejor en {ciudad} ({int(precio):,} silver)")
-        messagebox.showinfo("Mejor Ciudad Para Vender", "\n".join(lineas) if lineas else "Sin datos suficientes.")
-
-    # ------------------------------------------------------------------ #
     # IDEA NUEVA: HISTORIAL DE CARGAS CON "GRÁFICO" DE RENTABILIDAD
     # ------------------------------------------------------------------ #
     def build_tab_historial(self, parent):
@@ -2281,29 +2023,59 @@ class AlbionCargoApp(ctk.CTk):
         self.historial_scroll.pack(fill="both", expand=True, padx=5, pady=5)
         self.bind_mousewheel_recursive(self.historial_scroll, self.historial_scroll, orient="y")
 
-    def _guardar_snapshot_items(self, cursor, historial_id):
+    def _guardar_snapshot_banco(self, cursor):
         """
-        Guarda una copia de cada ítem (no cancelado) de la carga actual,
-        vinculada al historial_id recién archivado. Es la base para el
-        Ranking de Ítems más rentables (idea nueva).
+        Guarda una copia de CADA ítem de la carga actual (incluidos los
+        cancelados, con profit en 0) en el "Banco" -- el registro permanente
+        que sobrevive aunque la tabla activa se vacíe al exportar CSV/PDF.
+        De acá salen "Todos los Pedidos", "Compras con Profit" y el ranking
+        de Favoritos.
         """
         tax_rate = self.last_metrics.get("tax_rate", 0.08)
         ajuste_rate = 0.025
         setup_rate = 0.025
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
         for row in self.row_inputs:
-            if row["status"].get() == "✕ Cancelado":
-                continue
+            estado = row["status"].get()
             nombre = row["nombre"].get().strip() or "(sin nombre)"
+            tier = row["tier"].get()
             valor_oc = self.get_float(row["valor_oc"].get())
             precio_mn = self.get_float(row["precio_mn"].get())
             cantidad = int(self.get_float(row["cantidad"].get())) or 1
-            costo_unit = valor_oc * (1 + setup_rate)
-            venta_neta_unit = precio_mn * (1 - tax_rate - ajuste_rate)
-            profit_unidad = venta_neta_unit - costo_unit
+            favorito = 1 if row["favorito"]["on"] else 0
+
+            if estado == "✕ Cancelado":
+                profit_unidad = 0.0
+            else:
+                costo_unit = valor_oc * (1 + setup_rate)
+                venta_neta_unit = precio_mn * (1 - tax_rate - ajuste_rate)
+                profit_unidad = venta_neta_unit - costo_unit
+            profit_total = profit_unidad * cantidad
+
             cursor.execute('''
-                INSERT INTO historial_items (historial_id, user_id, nombre, cantidad, valor_oc, precio_mn, profit_unidad)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (historial_id, self.current_user_id, nombre, cantidad, valor_oc, precio_mn, profit_unidad))
+                INSERT INTO banco_items (user_id, hub, carga_nombre, nombre, cantidad, tier, estado,
+                                          valor_oc, precio_mn, profit_unidad, profit_total, favorito, fecha)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (self.current_user_id, self.current_hub, self.current_carga, nombre, cantidad, tier, estado,
+                  valor_oc, precio_mn, profit_unidad, profit_total, favorito, fecha))
+
+    def vaciar_carga_actual(self):
+        """
+        Borra todos los ítems de la carga activa (tabla + base de datos),
+        pero NO toca esencias, notas, ni configuración del hub. Se usa
+        después de mandar todo al Banco al exportar CSV/PDF (idea nueva #3).
+        """
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("DELETE FROM inventario WHERE user_id = ? AND hub = ? AND carga_nombre = ?",
+                  (self.current_user_id, self.current_hub, self.current_carga))
+        conn.commit()
+        conn.close()
+        for row in self.row_inputs:
+            row["frame"].destroy()
+        self.row_inputs.clear()
+        self.actualizar_contador_estados()
+        self.calculate_metrics()
 
     def archivar_carga(self):
         if not self.row_inputs:
@@ -2318,11 +2090,15 @@ class AlbionCargoApp(ctk.CTk):
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (self.current_user_id, self.current_hub, self.current_destino,
               datetime.now().strftime("%Y-%m-%d %H:%M"), m["inversion"], m["venta_neta"], m["profit_final"]))
-        self._guardar_snapshot_items(cursor, cursor.lastrowid)
+        self._guardar_snapshot_banco(cursor)
         conn.commit()
         conn.close()
-        messagebox.showinfo("Carga Archivada", "Se guardó una foto de esta carga en el Historial.")
+        messagebox.showinfo("Carga Archivada", "Se guardó una foto de esta carga en el Historial y en el Banco.")
         self.refresh_historial_tab()
+        if hasattr(self, "refrescar_banco_tab"):
+            self.refrescar_banco_tab()
+        if hasattr(self, "refrescar_favoritos_tab"):
+            self.refrescar_favoritos_tab()
 
     def refresh_historial_tab(self):
         if not hasattr(self, "historial_scroll"):
@@ -2695,7 +2471,6 @@ th {{ color:#97a2bd; }}
         total_venta_bruta = 0.0
 
         val_mochila_manual = self.get_float(self.ent_mochila_global.get())
-        margen_minimo = self.get_float(self.ent_margen_minimo.get()) if hasattr(self, "ent_margen_minimo") else 15.0
 
         for row in self.row_inputs:
             status = row["status"].get()
@@ -2715,7 +2490,7 @@ th {{ color:#97a2bd; }}
                     costo_unit = valor_oc_fila * (1 + setup_rate)
                     venta_neta_unit = precio_mn_fila * (1 - tax_rate - ajuste_rate)
                     margen_pct = ((venta_neta_unit - costo_unit) / costo_unit) * 100
-                    color_margen = "#3ddc84" if margen_pct >= margen_minimo else ("#e3a53c" if margen_pct >= 0 else "#ef5350")
+                    color_margen = "#3ddc84" if margen_pct >= 0 else "#ef5350"
                     lbl_margen.configure(text=f"{margen_pct:.0f}%", text_color=color_margen)
 
             if status == "✕ Cancelado":
