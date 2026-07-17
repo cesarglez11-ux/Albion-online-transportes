@@ -15,10 +15,6 @@ try:
     from PIL import Image, ImageTk
     PIL_DISPONIBLE = True
 except ImportError:
-    # En algunas distros de Linux (Mint, Ubuntu, Debian) 'Pillow' se instala
-    # con apt sin el conector a Tkinter -- ese conector es un paquete aparte
-    # (python3-pil.imagetk). Si falta, la app sigue funcionando normal, solo
-    # que sin ícono personalizado en la ventana.
     PIL_DISPONIBLE = False
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -27,29 +23,19 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 DB_NAME = "albion_cargo.db"
-
-# Ícono de la app: se descarga UNA sola vez de esta URL y se guarda en disco
-# como caché local (ICON_CACHE_FILE). Las siguientes veces que abras la app,
-# usa la copia guardada y no necesita internet.
 APP_ICON_URL = "https://i.imgur.com/Hi3Qz9r.png"
 ICON_CACHE_FILE = "app_icon_cache.png"
 
-# Listas de candidatos por estilo, en orden de preferencia. Si la PC de otro
-# jugador no tiene "Oxanium"/"Rajdhani"/"JetBrains Mono" instaladas, la app
-# cae automáticamente en la mejor alternativa disponible en su sistema en
-# vez de mostrar la fuente genérica fea de tkinter por defecto.
 FONT_DISPLAY_CANDIDATES = ["Oxanium", "Orbitron", "Audiowide", "Segoe UI Semibold", "Ubuntu", "Noto Sans", "DejaVu Sans"]
 FONT_BODY_CANDIDATES = ["Rajdhani", "Ubuntu", "Segoe UI", "Noto Sans", "DejaVu Sans", "Arial"]
 FONT_MONO_CANDIDATES = ["JetBrains Mono", "Cascadia Mono", "Consolas", "Ubuntu Mono", "DejaVu Sans Mono", "Courier New"]
 
-# Colores según el estado de la fila (pedido: proceso=naranja, recibido=verde, cancelado=rojo)
 STATUS_COLORS = {
     "✓ Recibido": "#3ddc84",
     "⚙ En Proceso": "#e3a53c",
     "✕ Cancelado": "#ef5350",
 }
 
-# Paleta extra "HUD Mercado Negro" (idea nueva: más color e identidad visual).
 ACCENT_PURPLE = "#9b5de5"
 ACCENT_PINK = "#f15bb5"
 ACCENT_GOLD = "#ffd166"
@@ -58,13 +44,6 @@ ACCENT_LIME = "#c5f04a"
 ACCENT_ICE = "#5aa9e6"
 ANIM_COLORS = ["#e3a53c", "#3ddc84", "#48c9dc", "#9b5de5", "#f15bb5", "#ef5350", "#2ec4b6", "#c5f04a"]
 
-# --------------------------------------------------------------------- #
-# REQUISITOS DE ENCANTADO: cuántas Runas/Almas/Reliquias pide Albion POR
-# CADA nivel de encantamiento (.1, .2, .3), según el tipo de pieza. Es
-# información fija del juego (no cambia por ciudad ni por servidor), así
-# que se muestra como tabla de referencia + calculadora rápida.
-# (nombre de la categoría, costo por nivel, color de acento)
-# --------------------------------------------------------------------- #
 ENCANTE_COSTOS = [
     ("Pies, Cascos, Armas Secundarias y Capas", 96, ACCENT_TEAL),
     ("Pecho y Bolsa", 192, ACCENT_ICE),
@@ -72,18 +51,28 @@ ENCANTE_COSTOS = [
     ("Armas de Dos Manos", 384, ACCENT_PINK),
 ]
 
-# Destinos posibles de la carga
+# --------------------------------------------------------------------- #
+# PÁGINAS (idea nueva del jugador): cada botón abre una página COMPLETA a
+# lo ancho de toda la ventana, una a la vez. Nada de paneles angostos con
+# sub-pestañas amontonadas -- eso fue lo que se veía mal y se cortaba.
+# "Mi Carga" es la página de arranque (la tabla de ítems).
+# --------------------------------------------------------------------- #
+PAGINAS = [
+    "📦 Mi Carga", "💎 Runas y Notas", "⚗ Refino", "✨ Encantar",
+    "🔄 Roundtrip", "🧪 Materiales", "📊 Historial", "🏦 Banco",
+    "★ Favoritos", "🚀 Viaje",
+]
+
+HORAS_OC_ATASCADA = 72
+
 DESTINO_MERCADO = "Mercado Negro (Caerleon)"
 DESTINO_HIDEOUT = "Hideout (Uso Personal)"
 DESTINOS = [DESTINO_MERCADO, DESTINO_HIDEOUT]
 
-# Orden de columnas navegables con el teclado (igual que celdas de Excel)
 TABLE_COLS = ["nombre", "cantidad", "tier", "valor_oc", "precio_mn"]
 ESSENCE_COLS = ["r", "a", "re"]
 
-# Ventana de expiración de una Orden de Compra en Albion (pedido: aviso de 24h)
 OC_EXPIRA_HORAS = 24
-
 
 
 def pick_available_font(candidates, fallback="TkDefaultFont"):
@@ -98,14 +87,6 @@ def pick_available_font(candidates, fallback="TkDefaultFont"):
 
 
 def cargar_icono_app():
-    """
-    Descarga el ícono de la app desde APP_ICON_URL la primera vez y lo guarda
-    como ICON_CACHE_FILE junto a la base de datos. Si ya existe el archivo
-    cacheado, lo usa directo (no vuelve a pedir internet). Si algo falla
-    (sin conexión, URL caída, Pillow/ImageTk no disponible, etc.) devuelve
-    None y la app simplemente arranca sin ícono personalizado -- nunca se
-    rompe por esto.
-    """
     if not PIL_DISPONIBLE:
         print("PIL/ImageTk no disponible (falta 'python3-pil.imagetk' en Linux) -- se sigue sin icono.")
         return None
@@ -123,11 +104,6 @@ def cargar_icono_app():
 
 
 def normalizar_texto(texto):
-    """
-    Pasa un texto a minúsculas y le saca los acentos, para poder comparar
-    "Poción" con "pocion" sin que la tilde arruine la búsqueda rápida de
-    ítems en la tabla. Ej: "Espadón" -> "espadon".
-    """
     texto = texto.strip().lower()
     texto = unicodedata.normalize("NFKD", texto)
     texto = "".join(c for c in texto if not unicodedata.combining(c))
@@ -138,9 +114,6 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # --- Tabla usuarios ---
-    # El nombre de personaje ahora es único POR REGIÓN (pedido #11): dos jugadores
-    # en regiones distintas pueden compartir nombre, pero dentro de la misma región no.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,9 +124,6 @@ def init_db():
             UNIQUE(username, region)
         )
     ''')
-    # Migración automática: si la base de datos viene de una versión anterior
-    # (username único global, sin columna "premium"), la recreamos preservando
-    # todos los datos existentes para que nada se pierda.
     cursor.execute("PRAGMA table_info(usuarios)")
     cols_usuarios = [c[1] for c in cursor.fetchall()]
     if "premium" not in cols_usuarios:
@@ -174,8 +144,6 @@ def init_db():
         ''')
         cursor.execute("DROP TABLE usuarios_old")
 
-    # --- Tabla inventario (sin "calidad": las calidades salen aleatorias al comprar,
-    # no aporta nada llevar registro de eso, pedido #8) ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS inventario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,20 +166,15 @@ def init_db():
         try:
             cursor.execute("ALTER TABLE inventario DROP COLUMN calidad")
         except sqlite3.OperationalError:
-            pass  # SQLite viejo sin soporte DROP COLUMN: queda la columna pero ya no se usa
-    # Migraciones aditivas para bases de datos ya existentes (no destructivas)
+            pass
     if "favorito" not in cols_inv:
         cursor.execute("ALTER TABLE inventario ADD COLUMN favorito INTEGER DEFAULT 0")
     if "oc_timestamp" not in cols_inv:
         cursor.execute("ALTER TABLE inventario ADD COLUMN oc_timestamp TEXT")
-    # Idea nueva: "cargas" paralelas dentro del mismo hub (ej. "Carga 1" y
-    # "Carga 2" comprando al mismo tiempo en Fort Sterling sin mezclarse).
     if "carga_nombre" not in cols_inv:
         cursor.execute("ALTER TABLE inventario ADD COLUMN carga_nombre TEXT DEFAULT 'Carga 1'")
         cursor.execute("UPDATE inventario SET carga_nombre = 'Carga 1' WHERE carga_nombre IS NULL")
 
-    # Catálogo de nombres de "carga" por hub (permite crear una carga vacía
-    # antes de meterle ítems, y saber qué mostrar en el selector).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cargas_meta (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,8 +185,6 @@ def init_db():
         )
     ''')
 
-    # Snapshot por ítem de cada carga archivada (idea nueva: ranking de
-    # ítems más rentables históricamente).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historial_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -238,8 +199,6 @@ def init_db():
         )
     ''')
 
-    # Checklist pre-viaje (idea nueva): se guarda marcado/desmarcado por
-    # usuario, no por hub, porque son hábitos generales antes de salir.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS checklist (
             user_id INTEGER,
@@ -268,8 +227,6 @@ def init_db():
             PRIMARY KEY(user_id, hub)
         )
     ''')
-    # Config de ruta/destino por hub: se guarda para que NO se borre nada al
-    # cambiar de ciudad, cerrar la app o reiniciarla (pedido #12).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS config_hub (
             user_id INTEGER,
@@ -285,18 +242,12 @@ def init_db():
     cols_config_hub = [c[1] for c in cursor.fetchall()]
     if "valor_mochila" not in cols_config_hub:
         cursor.execute("ALTER TABLE config_hub ADD COLUMN valor_mochila REAL DEFAULT 0")
-    # Config general por usuario (no por hub): guarda cosas que deben
-    # persistir entre reinicios de la app sin importar en qué ciudad estés,
-    # como la hora de "Inicio Carga/Compra" (idea nueva: solo se reinicia
-    # manualmente al exportar PDF o CSV, nunca por cerrar/abrir la app).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS config_general (
             user_id INTEGER PRIMARY KEY,
             inicio_carga TEXT
         )
     ''')
-    # Historial de cargas cerradas: cada vez que el jugador exporta/archiva una
-    # carga queda una foto fija de la rentabilidad para poder graficar en el tiempo.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historial_cargas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -310,11 +261,6 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES usuarios(id)
         )
     ''')
-
-    # "Banco" (idea nueva): registro permanente de TODO lo que compraste,
-    # incluso después de exportar CSV/PDF (que vacía la tabla activa). Sirve
-    # tanto para el listado de "Todos los Pedidos" como para "Compras con
-    # Profit" y el ranking de Favoritos -- todo sale de esta misma tabla.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS banco_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -340,7 +286,6 @@ def init_db():
 
 init_db()
 
-
 class AlbionCargoApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -349,8 +294,6 @@ class AlbionCargoApp(ctk.CTk):
         self.geometry("1420x960")
         self.minsize(1050, 680)
 
-        # Ícono de la app (ventana + barra de tareas). Blindado: si falla,
-        # la app sigue funcionando normal, solo que sin ícono personalizado.
         icono_img = cargar_icono_app()
         if icono_img is not None:
             try:
@@ -359,9 +302,6 @@ class AlbionCargoApp(ctk.CTk):
             except Exception as ex:
                 print(f"No se pudo aplicar el icono a la ventana: {ex}")
 
-        # Resolvemos las fuentes reales disponibles en ESTE sistema (necesita
-        # que la ventana ya exista). Así la app se ve bien en cualquier PC,
-        # no solo en la que tiene Oxanium/Rajdhani/JetBrains Mono instaladas.
         self.F_DISPLAY = pick_available_font(FONT_DISPLAY_CANDIDATES)
         self.F_BODY = pick_available_font(FONT_BODY_CANDIDATES)
         self.F_MONO = pick_available_font(FONT_MONO_CANDIDATES)
@@ -377,6 +317,7 @@ class AlbionCargoApp(ctk.CTk):
         self.fase_venta_activa = False
         self.modo_presentacion = False
         self._titulo_real_txt = ""
+        self.pagina_actual = "📦 Mi Carga"
 
         self.row_inputs = []
         self.essence_inputs = {}
@@ -387,13 +328,8 @@ class AlbionCargoApp(ctk.CTk):
             "costo_transporte": 0.0, "premium": False, "tax_rate": 0.08,
         }
 
-        # Click global para desenfocar las cajas de texto (Actúa como Esc)
         self.bind_all("<Button-1>", self.quitar_foco_clic)
         self.bind("<Escape>", lambda e: self.focus_set())
-
-        # Ctrl+A global: selecciona todo el texto de la caja/entrada que
-        # tenga el foco en ese momento (pedido nuevo: funciona en cualquier
-        # campo de texto de toda la app, no hay que bindearlo campo por campo).
         self.bind_all("<Control-a>", self.global_select_all)
         self.bind_all("<Control-A>", self.global_select_all)
 
@@ -402,7 +338,6 @@ class AlbionCargoApp(ctk.CTk):
         self.show_auth_screen()
 
     def quitar_foco_clic(self, event):
-        # Soltar foco solo si hacemos clic fuera de una entrada de texto
         try:
             widget = event.widget
             if not isinstance(widget, (tk.Entry, tk.Text, tk.Listbox)):
@@ -411,13 +346,6 @@ class AlbionCargoApp(ctk.CTk):
             pass
 
     def global_select_all(self, event):
-        """
-        Ctrl+A universal: si el foco está en una caja de texto de una sola
-        línea (Entry, incluye las de adentro de un CTkEntry) selecciona todo
-        su contenido; si está en un cuadro de texto multilínea (CTkTextbox,
-        como las Notas) selecciona todo el texto ahí. No hace nada raro en
-        otro tipo de widget (botones, menús, etc.).
-        """
         widget = self.focus_get()
         try:
             if isinstance(widget, tk.Text):
@@ -431,14 +359,78 @@ class AlbionCargoApp(ctk.CTk):
             pass
         return None
 
+    # ------------------------------------------------------------------ #
+    # VENTANAS PROPIAS EN VEZ DE LOS CUADROS FEOS DE WINDOWS/LINUX
+    # ------------------------------------------------------------------ #
+    def _centrar_ventana(self, win, ancho, alto):
+        try:
+            self.update_idletasks()
+            x = self.winfo_x() + (self.winfo_width() // 2) - (ancho // 2)
+            y = self.winfo_y() + (self.winfo_height() // 2) - (alto // 2)
+            win.geometry(f"{ancho}x{alto}+{max(x,0)}+{max(y,0)}")
+        except Exception:
+            pass
+
+    def _ventana_emergente(self, titulo, color_borde):
+        win = ctk.CTkToplevel(self)
+        win.title(titulo)
+        win.configure(fg_color="#12151f")
+        win.attributes("-topmost", True)
+        win.resizable(False, False)
+        win.transient(self)
+        borde = ctk.CTkFrame(win, fg_color="#12151f", border_color=color_borde, border_width=2, corner_radius=14)
+        borde.pack(fill="both", expand=True, padx=3, pady=3)
+        return win, borde
+
+    def _dialogo(self, titulo, mensaje, icono, color):
+        win, borde = self._ventana_emergente(titulo, color)
+        ctk.CTkLabel(borde, text=icono, font=(self.F_DISPLAY, 30, "bold"), text_color=color).pack(pady=(22, 6))
+        ctk.CTkLabel(borde, text=titulo, font=(self.F_DISPLAY, 15, "bold"), text_color="#eef1f8").pack(pady=(0, 10), padx=20)
+        ctk.CTkLabel(borde, text=mensaje, font=(self.F_BODY, 13), text_color="#c7cede",
+                     wraplength=380, justify="left").pack(padx=25, pady=(0, 20))
+        btn = ctk.CTkButton(borde, text="Listo", fg_color=color, text_color="#12141c",
+                             font=(self.F_BODY, 13, "bold"), width=140, command=win.destroy)
+        btn.pack(pady=(0, 22))
+        self._centrar_ventana(win, 440, 260)
+        win.grab_set()
+
+    def dialogo_info(self, titulo, mensaje):
+        self._dialogo(titulo, mensaje, "i", ACCENT_ICE)
+
+    def dialogo_warning(self, titulo, mensaje):
+        self._dialogo(titulo, mensaje, "!", "#e3a53c")
+
+    def dialogo_error(self, titulo, mensaje):
+        self._dialogo(titulo, mensaje, "x", "#ef5350")
+
+    def confirmar_dialogo(self, titulo, mensaje):
+        resultado = {"ok": False}
+        win, borde = self._ventana_emergente(titulo, "#ef5350")
+
+        def _si():
+            resultado["ok"] = True
+            win.destroy()
+
+        def _no():
+            resultado["ok"] = False
+            win.destroy()
+
+        ctk.CTkLabel(borde, text="!", font=(self.F_DISPLAY, 30, "bold"), text_color="#ef5350").pack(pady=(22, 6))
+        ctk.CTkLabel(borde, text=titulo, font=(self.F_DISPLAY, 15, "bold"), text_color="#eef1f8").pack(pady=(0, 10), padx=20)
+        ctk.CTkLabel(borde, text=mensaje, font=(self.F_BODY, 13), text_color="#c7cede",
+                     wraplength=380, justify="left").pack(padx=25, pady=(0, 20))
+        fila_btns = ctk.CTkFrame(borde, fg_color="transparent")
+        fila_btns.pack(pady=(0, 22))
+        ctk.CTkButton(fila_btns, text="Si, dale", fg_color="#ef5350", text_color="#eef1f8",
+                      font=(self.F_BODY, 13, "bold"), width=130, command=_si).pack(side="left", padx=8)
+        ctk.CTkButton(fila_btns, text="No, cancelar", fg_color="#1e2536", text_color="#eef1f8",
+                      font=(self.F_BODY, 13, "bold"), width=130, command=_no).pack(side="left", padx=8)
+        self._centrar_ventana(win, 440, 280)
+        win.grab_set()
+        win.wait_window()
+        return resultado["ok"]
+
     def bind_mousewheel_recursive(self, widget, scrollable_frame, orient="y"):
-        """
-        Hace que la rueda del mouse funcione para scrollear aunque el
-        puntero esté encima de cualquier widget hijo (filas de ítems,
-        labels, botones, etc.) y no solo sobre el borde del contenedor.
-        Tkinter no propaga la rueda del mouse hacia arriba automáticamente,
-        así que hay que bindearla a mano en cada widget de este árbol.
-        """
         canvas = getattr(scrollable_frame, "_parent_canvas", None)
         if canvas is None:
             return
@@ -470,21 +462,61 @@ class AlbionCargoApp(ctk.CTk):
             self.bind_mousewheel_recursive(child, scrollable_frame, orient=orient)
 
     def get_float(self, value):
-        # Función a prueba de balas para convertir textos a números sin crashear
+        """
+        Convierte lo que escribiste a número, a prueba de balas. Además
+        entiende abreviaturas de jugador: "500k" -> 500000, "1.5m" o
+        "1.5kk" -> 1500000. Las comas se tratan como separador de miles
+        (se ignoran), no como coma decimal.
+        """
         try:
-            val = str(value).replace(',', '.')
-            if val.strip() == "":
+            texto = str(value).strip().lower()
+            if texto == "":
                 return 0.0
-            return float(val)
+            texto = texto.replace(",", "")
+            multiplicador = 1.0
+            if texto.endswith("kk"):
+                multiplicador = 1_000_000.0
+                texto = texto[:-2]
+            elif texto.endswith("m"):
+                multiplicador = 1_000_000.0
+                texto = texto[:-1]
+            elif texto.endswith("k"):
+                multiplicador = 1_000.0
+                texto = texto[:-1]
+            texto = texto.strip()
+            if texto == "":
+                return 0.0
+            return float(texto) * multiplicador
         except (ValueError, TypeError, AttributeError):
             return 0.0
 
+    def formatear_numero_visual(self, widget):
+        """
+        Idea nueva: al salir de un campo de plata, si escribiste algo como
+        "500k" o "1.5m", lo traduce solo al número completo con comas de
+        miles ("500,000"). Así no hace falta tipear el número completo a
+        mano. Si el campo está en modo solo-lectura (readonly), lo habilita
+        un instante para poder reescribirlo y lo vuelve a dejar como estaba.
+        """
+        try:
+            estado_previo = widget.cget("state")
+        except Exception:
+            estado_previo = "normal"
+        texto_actual = widget.get()
+        if texto_actual.strip() == "":
+            return
+        valor = self.get_float(texto_actual)
+        nuevo_texto = f"{int(valor):,}"
+        if nuevo_texto == texto_actual:
+            return
+        if estado_previo == "readonly":
+            widget.configure(state="normal")
+        widget.delete(0, "end")
+        widget.insert(0, nuevo_texto)
+        if estado_previo == "readonly":
+            widget.configure(state="readonly")
+
     def set_display_text(self, widget, text, color=None):
-        """
-        Actualiza un CTkEntry de 'solo lectura' (usado para mostrar datos calculados).
-        El widget queda en estado 'readonly': se puede seleccionar y copiar su
-        contenido con el mouse o Ctrl+C, pero no se puede reescribir ni borrar.
-        """
         widget.configure(state="normal")
         widget.delete(0, "end")
         widget.insert(0, text)
@@ -510,7 +542,7 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_username = ctk.CTkEntry(self.auth_frame, placeholder_text="Ej: XitSsoTox", fg_color="#0b0e17", font=(self.F_BODY, 16), border_color="#2a3142", text_color="#eef1f8")
         self.ent_username.pack(fill="x", padx=45, pady=5)
 
-        lbl_region = ctk.CTkLabel(self.auth_frame, text="Region del servidor", font=(self.F_BODY, 15, "bold"), text_color="#eef1f8")
+        lbl_region = ctk.CTkLabel(self.auth_frame, text="Región del servidor", font=(self.F_BODY, 15, "bold"), text_color="#eef1f8")
         lbl_region.pack(anchor="w", padx=45, pady=(10, 2))
 
         self.sel_region = ctk.CTkOptionMenu(
@@ -528,7 +560,6 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_password = ctk.CTkEntry(self.auth_frame, placeholder_text="••••••••", show="*", fg_color="#0b0e17", font=(self.F_BODY, 16), border_color="#2a3142", text_color="#eef1f8")
         self.ent_password.pack(fill="x", padx=45, pady=5)
 
-        # Carga automática del último usuario registrado
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute("SELECT username, region FROM usuarios ORDER BY id DESC LIMIT 1")
@@ -551,13 +582,11 @@ class AlbionCargoApp(ctk.CTk):
         password = self.ent_password.get().strip()
 
         if not username or not password:
-            messagebox.showerror("Error", "¡Campos vacíos!")
+            self.dialogo_error("Error", "Faltan campos por completar.")
             return
 
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        # Único por (username, region): el mismo nombre puede existir en otra región
-        # como una cuenta totalmente distinta (pedido #11).
         cursor.execute("SELECT id, password, premium FROM usuarios WHERE username = ? AND region = ?", (username, region))
         row = cursor.fetchone()
 
@@ -571,13 +600,13 @@ class AlbionCargoApp(ctk.CTk):
                 self.auth_frame.destroy()
                 self.iniciar_hud_seguro()
             else:
-                messagebox.showerror("Error", "Clave incorrecta para ese personaje en esta región.")
+                self.dialogo_error("Error", "La contraseña no coincide para ese personaje en esta región.")
         else:
             try:
                 cursor.execute("INSERT INTO usuarios (username, region, password, premium) VALUES (?, ?, ?, 0)", (username, region, password))
                 conn.commit()
             except sqlite3.IntegrityError:
-                messagebox.showerror("Error", "Ese nombre ya está en uso en esta región.")
+                self.dialogo_error("Error", "Ese nombre ya está en uso en esta región.")
                 conn.close()
                 return
             self.current_user_id = cursor.lastrowid
@@ -589,21 +618,16 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
 
     def iniciar_hud_seguro(self):
-        """
-        Envuelve show_main_hud() en un try/except: si algo falla al armar la
-        pantalla principal, en vez de quedar la ventana "pegada" en silencio,
-        te muestra el error exacto en un popup para poder diagnosticarlo.
-        """
         try:
             self.show_main_hud()
         except Exception as ex:
             import traceback
             detalle = traceback.format_exc()
             print(detalle)
-            messagebox.showerror(
-                "Error al abrir el panel principal",
-                f"Ocurrió un error construyendo la pantalla:\n\n{ex}\n\n"
-                "Mirá la consola/terminal para el detalle completo."
+            self.dialogo_error(
+                "Se rompió algo al abrir la app",
+                f"Pasó esto:\n\n{ex}\n\n"
+                "Fijate en la consola/terminal para ver el detalle completo."
             )
 
     # ------------------------------------------------------------------ #
@@ -621,8 +645,6 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_title.pack(side="left", padx=25, pady=30)
         self.set_display_text(self.ent_title, title_txt)
 
-        # Indicador "en vivo" parpadeante (idea nueva: le da vida al HUD,
-        # como una lucecita de grabación activa junto al reloj).
         self.lbl_live_dot = ctk.CTkLabel(self.header_frame, text="●", font=(self.F_MONO, 14, "bold"), text_color="#3ddc84")
         self.lbl_live_dot.pack(side="left", padx=(10, 0), pady=30)
 
@@ -630,29 +652,17 @@ class AlbionCargoApp(ctk.CTk):
         self.lbl_live_clock.pack(side="left", padx=(6, 50), pady=30)
         self.update_live_clock()
 
-        # NOTA: el botón de tema claro/oscuro que había acá se sacó a propósito.
-        # Toda la app usa colores de fondo fijos pensados para verse oscura
-        # (estética "Mercado Negro"); un modo claro real necesitaría rediseñar
-        # cada color de la app por separado. En vez de dejar un botón que rompe
-        # la legibilidad, se fuerza el modo oscuro siempre (ver
-        # ctk.set_appearance_mode("Dark") al principio del archivo).
-
-        # Botón de backup manual de la base de datos (idea nueva: calidad de vida)
-        self.btn_backup = ctk.CTkButton(self.header_frame, text="💾 Backup DB", width=110, fg_color="#1e2536",
+        self.btn_backup = ctk.CTkButton(self.header_frame, text="Backup DB", width=110, fg_color="#1e2536",
                                          hover_color=ACCENT_PURPLE, font=(self.F_BODY, 13, "bold"),
                                          command=self.backup_database)
         self.btn_backup.pack(side="right", padx=5, pady=30)
 
-        # Comparar el profit acumulado de todos tus personajes registrados
-        # en esta base de datos (idea nueva: multi-cuenta).
-        self.btn_cuentas = ctk.CTkButton(self.header_frame, text="👥 Cuentas", width=110, fg_color="#1e2536",
+        self.btn_cuentas = ctk.CTkButton(self.header_frame, text="Cuentas", width=110, fg_color="#1e2536",
                                           hover_color=ACCENT_TEAL, font=(self.F_BODY, 13, "bold"),
                                           command=self.comparar_cuentas)
         self.btn_cuentas.pack(side="right", padx=5, pady=30)
 
-        # Modo presentación (idea nueva): oculta el nombre de personaje y
-        # bloquea toda la tabla para compartir pantalla sin exponer datos.
-        self.btn_presentacion = ctk.CTkButton(self.header_frame, text="🕶 Modo Presentación", width=170, fg_color="#1e2536",
+        self.btn_presentacion = ctk.CTkButton(self.header_frame, text="Modo Presentación", width=160, fg_color="#1e2536",
                                                hover_color=ACCENT_PINK, font=(self.F_BODY, 13, "bold"),
                                                command=self.toggle_modo_presentacion)
         self.btn_presentacion.pack(side="right", padx=5, pady=30)
@@ -665,11 +675,6 @@ class AlbionCargoApp(ctk.CTk):
         self.hub_selector.set(self.current_hub)
         self.hub_selector.pack(side="right", padx=25, pady=30)
 
-        # Barra animada de "flujo de datos" del Mercado Negro (idea nueva:
-        # detalle estético único). Es un Canvas angosto justo debajo del
-        # header que hace correr un bloque de color de un lado a otro,
-        # cambiando de color: le da un toque HUD/cyberpunk a la app sin
-        # afectar ninguna función.
         self.scan_canvas = tk.Canvas(self, height=4, bg="#0d111c", highlightthickness=0, bd=0)
         self.scan_canvas.pack(fill="x", padx=25, pady=(0, 10))
         self._scan_pos = 0
@@ -683,19 +688,19 @@ class AlbionCargoApp(ctk.CTk):
 
         row1 = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         row1.pack(fill="x")
+        ctk.CTkFrame(self.top_bar, fg_color="#232a3c", height=1, corner_radius=0).pack(fill="x", padx=18)
         row2 = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         row2.pack(fill="x")
+        ctk.CTkFrame(self.top_bar, fg_color="#232a3c", height=1, corner_radius=0).pack(fill="x", padx=18)
         row3 = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         row3.pack(fill="x")
+        ctk.CTkFrame(self.top_bar, fg_color="#232a3c", height=1, corner_radius=0).pack(fill="x", padx=18)
         row4 = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         row4.pack(fill="x")
 
         lbl_t1 = ctk.CTkLabel(row1, text="Inicio Carga/Compra:", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
         lbl_t1.pack(side="left", padx=(20, 10), pady=15)
         self.ent_start_time = ctk.CTkEntry(row1, placeholder_text="Ej: 2026-07-11 12:00", width=160, fg_color="#0d111c", text_color="#eef1f8")
-        # CAMBIO PEDIDO #5: la hora de inicio ahora se carga desde la base de
-        # datos (persiste entre reinicios de la app) y solo vuelve a "ahora"
-        # cuando exportás un PDF o un CSV (ver reiniciar_inicio_carga()).
         self.ent_start_time.insert(0, self.cargar_inicio_carga())
         self.ent_start_time.pack(side="left", padx=5, pady=15)
         self.ent_start_time.bind("<KeyRelease>", lambda e: (self.guardar_inicio_carga(), self.update_oc_expira_label()))
@@ -717,25 +722,21 @@ class AlbionCargoApp(ctk.CTk):
             dropdown_fg_color="#12151f", dropdown_hover_color="#48c9dc", dropdown_text_color="#eef1f8",
             font=(self.F_BODY, 13, "bold"), text_color="#eef1f8", width=220)
 
-        # Aviso de expiración de OC (idea nueva: logística/riesgo). Se calcula sobre
-        # ent_start_time + 24h, en texto, sin depender de que la app siga abierta.
         self.lbl_oc_expira = ctk.CTkLabel(row1, text="", font=(self.F_MONO, 13, "bold"), text_color="#e3a53c")
         self.lbl_oc_expira.pack(side="left", padx=(20, 10), pady=15)
 
-        # Premium (pedido #5): baja el impuesto de venta del 8% al 4%
         self.switch_premium = ctk.CTkSwitch(
             row2, text="Cuenta Premium (Impuesto Mercado Negro 8% → 4%)",
             font=(self.F_BODY, 13, "bold"), progress_color="#3ddc84",
             command=self.toggle_premium)
         self.switch_premium.pack(side="left", padx=(20, 30), pady=15)
 
-        # Costo de transporte, solo relevante y visible si el destino es Hideout
         self.lbl_costo_transporte = ctk.CTkLabel(row2, text="Costo de Transporte a Hideout:", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
         self.ent_costo_transporte = ctk.CTkEntry(row2, placeholder_text="0", width=140, fg_color="#0d111c", text_color="#48c9dc", font=(self.F_MONO, 14, "bold"))
         self.ent_costo_transporte.insert(0, "0")
         self.ent_costo_transporte.bind("<KeyRelease>", lambda e: self.save_costo_transporte())
+        self.ent_costo_transporte.bind("<FocusOut>", lambda e: self.formatear_numero_visual(self.ent_costo_transporte))
 
-        # Mochila Manual, Global e Independiente
         lbl_mochila_section = ctk.CTkLabel(row2, text="Valor De La Mochila (Inventario):", font=(self.F_DISPLAY, 14, "bold"), text_color="#48c9dc")
         lbl_mochila_section.pack(side="right", padx=(10, 20), pady=15)
 
@@ -743,8 +744,8 @@ class AlbionCargoApp(ctk.CTk):
         self.ent_mochila_global.insert(0, "0")
         self.ent_mochila_global.pack(side="right", padx=5, pady=15)
         self.ent_mochila_global.bind("<KeyRelease>", lambda e: self.guardar_valor_mochila())
+        self.ent_mochila_global.bind("<FocusOut>", lambda e: self.formatear_numero_visual(self.ent_mochila_global))
 
-        # Peso de carga vs. capacidad de montura (idea nueva: logística/riesgo)
         lbl_peso = ctk.CTkLabel(row3, text="Peso Carga (kg):", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
         lbl_peso.pack(side="left", padx=(20, 10), pady=15)
         self.ent_peso_carga = ctk.CTkEntry(row3, placeholder_text="0", width=100, fg_color="#0d111c", text_color="#eef1f8", font=(self.F_MONO, 14, "bold"))
@@ -768,11 +769,10 @@ class AlbionCargoApp(ctk.CTk):
         self.lbl_peso_status = ctk.CTkLabel(row3, text="", font=(self.F_MONO, 13, "bold"), text_color="#3ddc84")
         self.lbl_peso_status.pack(side="left", padx=(15, 10), pady=15)
 
-        # Etiqueta de riesgo por ruta (idea nueva: logística/riesgo)
         lbl_riesgo = ctk.CTkLabel(row3, text="Riesgo de Ruta:", font=(self.F_BODY, 14, "bold"), text_color="#97a2bd")
         lbl_riesgo.pack(side="right", padx=(10, 20), pady=15)
         self.sel_riesgo = ctk.CTkOptionMenu(
-            row3, values=["🟢 Zona Segura", "🟡 Zona Amarilla", "🔴 Zona Roja", "⚫ Zona Negra"],
+            row3, values=["Zona Segura", "Zona Amarilla", "Zona Roja", "Zona Negra"],
             command=lambda v: self.update_riesgo_ui(),
             fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
             dropdown_fg_color="#12151f", dropdown_hover_color="#ef5350", dropdown_text_color="#eef1f8",
@@ -781,19 +781,15 @@ class AlbionCargoApp(ctk.CTk):
         self.lbl_riesgo_mult = ctk.CTkLabel(row3, text="", font=(self.F_MONO, 13, "bold"), text_color="#ef5350")
         self.lbl_riesgo_mult.pack(side="right", padx=(10, 5), pady=15)
 
-        # Checklist pre-viaje (idea nueva): hábitos rápidos antes de salir.
-        self.btn_checklist = ctk.CTkButton(row4, text="✅ Checklist Pre-Viaje", fg_color="#1e2536", hover_color=ACCENT_LIME,
-                                            text_color="#eef1f8", font=(self.F_BODY, 13, "bold"), width=190,
+        self.btn_checklist = ctk.CTkButton(row4, text="Checklist Pre-Viaje", fg_color="#1e2536", hover_color=ACCENT_LIME,
+                                            text_color="#eef1f8", font=(self.F_BODY, 13, "bold"), width=180,
                                             command=self.abrir_checklist)
         self.btn_checklist.pack(side="left", padx=(20, 10), pady=15)
 
-        # Eficiencia: silver ganado por hora transcurrida desde que arrancó
-        # la logística (idea nueva, "bonus" propio): te dice qué tan bien
-        # estás aprovechando el tiempo, no solo el profit en bruto.
         self.lbl_eficiencia = ctk.CTkLabel(row4, text="", font=(self.F_MONO, 13, "bold"), text_color=ACCENT_TEAL)
         self.lbl_eficiencia.pack(side="right", padx=(10, 20), pady=15)
 
-        # Cuadros de Contadores Elitizados
+        # Cuadros de Contadores
         self.counters_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.counters_frame.pack(fill="x", padx=25, pady=(15, 0))
 
@@ -805,185 +801,91 @@ class AlbionCargoApp(ctk.CTk):
         self.lbl_desglose = ctk.CTkLabel(self, text="", font=(self.F_BODY, 12), text_color="#97a2bd", anchor="w", justify="left")
         self.lbl_desglose.pack(fill="x", padx=33, pady=(6, 0))
 
-        self.workspace = ctk.CTkFrame(self, fg_color="transparent")
-        self.workspace.pack(fill="both", expand=True, padx=25, pady=(10, 25))
+        # ------------------------------------------------------------------ #
+        # NAVEGACIÓN POR PÁGINAS COMPLETAS (idea nueva del jugador): cada
+        # botón de acá abre una página entera a lo ancho de la ventana, en
+        # vez de amontonar todo en un panel angosto al costado.
+        # ------------------------------------------------------------------ #
+        self.nav_bar = ctk.CTkFrame(self, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        self.nav_bar.pack(fill="x", padx=25, pady=(15, 10))
 
-        self.left_panel = ctk.CTkFrame(self.workspace, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
-        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 15))
-
-        table_actions = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        table_actions.pack(fill="x", padx=20, pady=15)
-
-        self.lbl_manifest = ctk.CTkEntry(table_actions, width=280, font=(self.F_DISPLAY, 18, "bold"), text_color="#eef1f8",
-                                         fg_color="transparent", border_width=0, justify="left")
-        self.lbl_manifest.pack(side="left")
-
-        # Selector de "Carga" (idea nueva: cargas paralelas dentro del mismo
-        # hub, ej. "Carga 1" comprando para Mercado Negro y "Carga 2" para
-        # Hideout al mismo tiempo, sin que los ítems se mezclen en la tabla).
-        self.sel_carga = ctk.CTkOptionMenu(
-            table_actions, values=["Carga 1"], command=self.change_carga,
-            fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
-            dropdown_fg_color="#12151f", dropdown_hover_color=ACCENT_PURPLE, dropdown_text_color="#eef1f8",
-            font=(self.F_BODY, 13, "bold"), text_color=ACCENT_PURPLE, width=150)
-        self.sel_carga.pack(side="left", padx=(15, 5))
-
-        btn_nueva_carga = ctk.CTkButton(table_actions, text="+ Carga", width=70, fg_color="#1e2536",
-                                         hover_color=ACCENT_PURPLE, font=(self.F_BODY, 12, "bold"),
-                                         command=self.crear_nueva_carga)
-        btn_nueva_carga.pack(side="left", padx=(0, 10))
-
-        self.btn_fase = ctk.CTkButton(table_actions, text="✓ Pasar a Venta", fg_color="#e3a53c", text_color="#12141c", font=(self.F_BODY, 11, "bold"), width=130, height=26, command=self.activar_fase_venta)
-        self.btn_fase.pack(side="right", padx=5)
-
-        self.btn_regresar = ctk.CTkButton(table_actions, text="✕ Cancelar Venta", fg_color="#ef5350", text_color="#eef1f8", font=(self.F_BODY, 11, "bold"), width=130, height=26, command=self.regresar_fase_compra)
-
-        btn_add = ctk.CTkButton(table_actions, text="+ Meter Ítem", fg_color="#48c9dc", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=110, command=self.add_item_row)
-        btn_add.pack(side="right", padx=5)
-
-        btn_pdf = ctk.CTkButton(table_actions, text="Generar PDF", fg_color="#3ddc84", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=170, command=self.export_to_pdf)
-        btn_pdf.pack(side="right", padx=5)
-
-        # Exportar a CSV/Excel (idea nueva: calidad de vida)
-        btn_csv = ctk.CTkButton(table_actions, text="Exportar CSV", fg_color="#97a2bd", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=140, command=self.export_to_csv)
-        btn_csv.pack(side="right", padx=5)
-
-        # Exportar una vista de solo lectura para compartir con el gremio
-        # (idea nueva): un HTML autocontenido, sin contraseña ni datos de
-        # cuenta editables, solo la ruta y los números de esta carga.
-        btn_vista_gremio = ctk.CTkButton(table_actions, text="📤 Vista Gremio", fg_color=ACCENT_TEAL, text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=140, command=self.exportar_vista_gremio)
-        btn_vista_gremio.pack(side="right", padx=5)
-
-        # Archivar carga al historial (idea nueva: historial de rentabilidad)
-        btn_archivar = ctk.CTkButton(table_actions, text="📌 Archivar al Historial", fg_color="#e3a53c", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=190, command=self.archivar_carga)
-        btn_archivar.pack(side="right", padx=5)
-
-        # Idea nueva: buscador rápido + contador de ítems por estado. Todo en
-        # una segunda fila de herramientas, debajo de los botones de acción.
-        table_toolbar2 = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        table_toolbar2.pack(fill="x", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(table_toolbar2, text="🔎", font=(self.F_BODY, 14), text_color="#97a2bd").pack(side="left", padx=(0, 4))
-        self.ent_buscar_item = ctk.CTkEntry(table_toolbar2, placeholder_text="Buscar ítem por nombre...", width=260,
-                                             fg_color="#0d111c", text_color="#eef1f8")
-        self.ent_buscar_item.pack(side="left")
-        self.ent_buscar_item.bind("<KeyRelease>", lambda e: self.filtrar_tabla())
-
-        self.lbl_contador_estados = ctk.CTkLabel(table_toolbar2, text="", font=(self.F_MONO, 13, "bold"), text_color="#97a2bd")
-        self.lbl_contador_estados.pack(side="right", padx=5)
-
-        self.table_scroll = ctk.CTkScrollableFrame(self.left_panel, fg_color="#0d111c", corner_radius=10)
-        self.table_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 15))
-
-        headers_frame = ctk.CTkFrame(self.table_scroll, fg_color="transparent")
-        headers_frame.pack(fill="x", pady=(5, 10))
-        headers = ["★", "Estado", "Nombre del Ítem", "Cant.", "Tier", "Valor Compra O/C", "Precio de Venta", "Margen %", "OC"]
-        widths = [30, 130, 260, 70, 80, 150, 150, 90, 90]
-        for h, w in zip(headers, widths):
-            lbl = ctk.CTkLabel(headers_frame, text=h, font=(self.F_BODY, 14, "bold"), text_color="#97a2bd", width=w, anchor="w" if h not in ("Estado", "★") else "center")
-            lbl.pack(side="left", padx=4)
-
-        # Rueda del mouse para scrollear la tabla de ítems (pedido nuevo):
-        # se bindea de forma recursiva a todo lo que ya existe en el
-        # contenedor (encabezados incluidos); las filas nuevas se bindean
-        # solas al crearse en create_row_ui().
-        self.bind_mousewheel_recursive(self.table_scroll, self.table_scroll, orient="y")
-
-        # Panel Derecho (Utilidades Auxiliares)
-        self.right_panel = ctk.CTkFrame(self.workspace, fg_color="#161a26", width=500, border_color="#2a3142", border_width=1, corner_radius=14)
-        self.right_panel.pack(side="right", fill="y")
-        self.right_panel.pack_propagate(False)
-
-        # Pestañas del panel derecho: separamos Esencias/Notas de las cosas nuevas
-        # (refinado, roundtrip, historial) para no amontonar todo en una sola columna.
-        # OJO: se hacen "a mano" con botones + frames en vez de usar CTkTabview,
-        # porque ese widget no existe en versiones viejas de customtkinter y
-        # rompía la app entera al arrancar (quedaba "pegada").
-        tabs_btn_bar = ctk.CTkFrame(self.right_panel, fg_color="transparent")
-        tabs_btn_bar.pack(fill="x", padx=10, pady=(10, 0))
-
-        tabs_container = ctk.CTkFrame(self.right_panel, fg_color="#161a26")
-        tabs_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        tab_general = ctk.CTkFrame(tabs_container, fg_color="transparent")
-        tab_refino = ctk.CTkFrame(tabs_container, fg_color="transparent")
-        tab_encante = ctk.CTkFrame(tabs_container, fg_color="transparent")
-        tab_round = ctk.CTkFrame(tabs_container, fg_color="transparent")
-        tab_hist = ctk.CTkFrame(tabs_container, fg_color="transparent")
-        self._tab_frames = {"General": tab_general, "Refino": tab_refino, "Encantar": tab_encante, "Roundtrip": tab_round, "Historial": tab_hist}
-        self._tab_buttons = {}
-
-        def mostrar_tab(nombre):
-            for n, frame in self._tab_frames.items():
-                frame.pack_forget()
-            self._tab_frames[nombre].pack(fill="both", expand=True)
-            for n, btn in self._tab_buttons.items():
-                btn.configure(fg_color="#e3a53c" if n == nombre else "#1c2130",
-                               text_color="#12141c" if n == nombre else "#eef1f8")
-
-        self._mostrar_tab_fn = mostrar_tab
-
-        for nombre in ("General", "Refino", "Encantar", "Roundtrip", "Historial"):
-            b = ctk.CTkButton(tabs_btn_bar, text=nombre, width=64, font=(self.F_BODY, 11, "bold"),
+        self._pagina_botones = {}
+        for nombre in PAGINAS:
+            b = ctk.CTkButton(self.nav_bar, text=nombre, font=(self.F_BODY, 12, "bold"), height=34,
                                fg_color="#1c2130", text_color="#eef1f8", hover_color=ACCENT_PURPLE,
-                               command=lambda n=nombre: mostrar_tab(n))
-            b.pack(side="left", padx=2)
-            self._tab_buttons[nombre] = b
+                               command=lambda n=nombre: self.mostrar_pagina(n))
+            b.pack(side="left", padx=4, pady=8, fill="x", expand=True)
+            self._pagina_botones[nombre] = b
 
-        mostrar_tab("General")
+        # Atajos Ctrl+1..9 para saltar directo a una página (las primeras 9).
+        for i, nombre in enumerate(PAGINAS, start=1):
+            if i > 9:
+                break
+            accion = lambda e, n=nombre: self.mostrar_pagina(n)
+            for secuencia in (f"<Control-Key-{i}>", f"<Control-{i}>", f"<Control-KP_{i}>"):
+                self.bind_all(secuencia, accion)
 
-        # Atajos Ctrl+1..5 (idea nueva): saltar entre pestañas sin mouse.
-        orden_tabs = ["General", "Refino", "Encantar", "Roundtrip", "Historial"]
-        for i, nombre in enumerate(orden_tabs, start=1):
-            self.bind_all(f"<Control-Key-{i}>", lambda e, n=nombre: mostrar_tab(n))
-
-        # --- Tab General: esencias + notas (igual que antes) ---
-        lbl_esencias = ctk.CTkLabel(tab_general, text="Runas, Almas y Reliquias", font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c")
-        lbl_esencias.pack(pady=(10, 2), padx=5, anchor="w")
-
-        # CTkScrollableFrame con scroll HORIZONTAL: es la red de seguridad para
-        # que la columna "Reliquias" nunca vuelva a quedar cortada/invisible.
-        # Panel más ancho (500px) + columnas más angostas + rueda del mouse
-        # (con Shift) para deslizar sin depender solo de la barrita de abajo.
-        self.essence_scroll = ctk.CTkScrollableFrame(
-            tab_general, fg_color="#0d111c", corner_radius=10,
-            orientation="horizontal", height=235
-        )
-        self.essence_scroll.pack(fill="x", padx=5, pady=5)
-        self.render_essence_inputs()
-        self.bind_mousewheel_recursive(self.essence_scroll, self.essence_scroll, orient="x")
-
-        lbl_notas = ctk.CTkLabel(tab_general, text="Inteligencia de Zona / Notas Extra", font=(self.F_DISPLAY, 14, "bold"), text_color="#eef1f8")
-        lbl_notas.pack(pady=(15, 2), padx=5, anchor="w")
-
-        self.txt_notes = ctk.CTkTextbox(tab_general, fg_color="#0d111c", font=(self.F_BODY, 15), border_color="#2a3142", border_width=1, height=160)
-        self.txt_notes.pack(fill="both", expand=True, padx=5, pady=(0, 10))
-        self.txt_notes.bind("<KeyRelease>", lambda e: self.save_notes())
-
-        # --- Tab Refino: calculadora de ratio materia prima -> refinado ---
-        self.build_tab_refino(tab_refino)
-
-        # --- Tab Encantar: requisitos de Runas/Almas/Reliquias por tipo de pieza ---
-        self.build_tab_encantar(tab_encante)
-
-        # --- Tab Roundtrip: comprar en NPC y vender directo en Mercado Negro ---
-        self.build_tab_roundtrip(tab_round)
-
-        # --- Tab Historial: lista simple + "gráfico" ascii de rentabilidad ---
-        self.build_tab_historial(tab_hist)
+        # Contenedor de la página actual, a todo lo ancho de la ventana.
+        self.content_area = ctk.CTkFrame(self, fg_color="transparent")
+        self.content_area.pack(fill="both", expand=True, padx=25, pady=(0, 25))
 
         if self.is_premium:
             self.switch_premium.select()
 
-        self.refrescar_selector_cargas()
-        self.load_hub_data()
+        self.mostrar_pagina("📦 Mi Carga")
         self.update_peso_ui()
         self.update_riesgo_ui()
+
+    def mostrar_pagina(self, nombre):
+        """
+        Limpia el área de contenido y construye ahí adentro la página
+        elegida, a todo lo ancho de la ventana. Es la única forma de
+        cambiar de vista en toda la app -- reemplaza al viejo sistema de
+        secciones+sub-pestañas apretadas que se veía mal y se cortaba.
+        """
+        self.pagina_actual = nombre
+        # Estos grupos de widgets solo existen mientras su página está
+        # abierta; los "olvidamos" acá para no quedarnos con referencias a
+        # widgets que ya van a ser destruidos.
+        self.row_inputs = []
+        self.essence_inputs = {}
+
+        for w in self.content_area.winfo_children():
+            w.destroy()
+
+        for n, btn in self._pagina_botones.items():
+            activo = (n == nombre)
+            btn.configure(fg_color="#e3a53c" if activo else "#1c2130",
+                           text_color="#12141c" if activo else "#eef1f8")
+
+        if nombre == "📦 Mi Carga":
+            self.build_pagina_mi_carga(self.content_area)
+        elif nombre == "💎 Runas y Notas":
+            self.build_pagina_runas_notas(self.content_area)
+        elif nombre == "⚗ Refino":
+            self.build_tab_refino(self.content_area)
+        elif nombre == "✨ Encantar":
+            self.build_tab_encantar(self.content_area)
+        elif nombre == "🔄 Roundtrip":
+            self.build_tab_roundtrip(self.content_area)
+        elif nombre == "🧪 Materiales":
+            self.build_tab_materiales(self.content_area)
+        elif nombre == "📊 Historial":
+            self.build_tab_historial(self.content_area)
+            self.refresh_historial_tab()
+        elif nombre == "🏦 Banco":
+            self.build_tab_banco(self.content_area)
+        elif nombre == "★ Favoritos":
+            self.build_tab_favoritos(self.content_area)
+        elif nombre == "🚀 Viaje":
+            self.build_tab_viaje(self.content_area)
+
+        self.calculate_metrics()
+        self.actualizar_contador_estados()
 
     def update_live_clock(self):
         current_time = datetime.now().strftime("%H:%M:%S")
         self.lbl_live_clock.configure(text=f"HORA LOCAL: {current_time}")
-        # Parpadeo simple del puntito "en vivo" (idea estética nueva)
         if hasattr(self, "lbl_live_dot"):
             actual = self.lbl_live_dot.cget("text_color")
             nuevo_color = "#1c2130" if actual == "#3ddc84" else "#3ddc84"
@@ -993,12 +895,6 @@ class AlbionCargoApp(ctk.CTk):
         self.after(1000, self.update_live_clock)
 
     def animate_scan_bar(self):
-        """
-        Anima una barrita de "flujo de datos" debajo del header: un bloque
-        de color que rebota de izquierda a derecha y va cambiando de color
-        entre la paleta de acento de la app. Puramente decorativo (idea #6/7/8
-        pedida por el usuario), no afecta ningún cálculo ni dato guardado.
-        """
         if not hasattr(self, "scan_canvas") or not self.scan_canvas.winfo_exists():
             return
         try:
@@ -1029,8 +925,6 @@ class AlbionCargoApp(ctk.CTk):
         card = ctk.CTkFrame(parent, fg_color="#161a26", border_color=color, border_width=1, corner_radius=16)
         card.pack(side="left", fill="x", expand=True, padx=8)
 
-        # Franja de acento arriba de la tarjeta (idea estética nueva: le da un
-        # borde "neón" a cada contador, look HUD de nave/terminal).
         strip = ctk.CTkFrame(card, fg_color=color, height=3, corner_radius=0)
         strip.pack(fill="x", side="top")
 
@@ -1044,13 +938,114 @@ class AlbionCargoApp(ctk.CTk):
         return lbl, val
 
     # ------------------------------------------------------------------ #
-    # CARGA / GUARDADO DE DATOS POR HUB
+    # PÁGINA: MI CARGA (la tabla de ítems, ahora a todo lo ancho)
     # ------------------------------------------------------------------ #
-    def refresh_manifest_label(self):
-        ruta_txt = f" ({self.current_ruta_tipo})" if self.current_ruta_tipo and self.current_hub != "Caerleon" else ""
-        self.set_display_text(self.lbl_manifest, f"Ruta: {self.current_hub}{ruta_txt} → {self.current_destino}")
+    def build_pagina_mi_carga(self, parent):
+        panel = ctk.CTkFrame(parent, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        panel.pack(fill="both", expand=True)
 
-    def load_hub_data(self):
+        table_actions = ctk.CTkFrame(panel, fg_color="transparent")
+        table_actions.pack(fill="x", padx=20, pady=15)
+
+        self.lbl_manifest = ctk.CTkEntry(table_actions, width=280, font=(self.F_DISPLAY, 18, "bold"), text_color="#eef1f8",
+                                         fg_color="transparent", border_width=0, justify="left")
+        self.lbl_manifest.pack(side="left")
+
+        self.sel_carga = ctk.CTkOptionMenu(
+            table_actions, values=["Carga 1"], command=self.change_carga,
+            fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
+            dropdown_fg_color="#12151f", dropdown_hover_color=ACCENT_PURPLE, dropdown_text_color="#eef1f8",
+            font=(self.F_BODY, 13, "bold"), text_color=ACCENT_PURPLE, width=150)
+        self.sel_carga.pack(side="left", padx=(15, 5))
+
+        btn_nueva_carga = ctk.CTkButton(table_actions, text="+ Carga", width=65, fg_color="#1e2536",
+                                         hover_color=ACCENT_PURPLE, font=(self.F_BODY, 11, "bold"), height=26,
+                                         command=self.crear_nueva_carga)
+        btn_nueva_carga.pack(side="left", padx=(0, 4))
+
+        btn_retirar_carga = ctk.CTkButton(table_actions, text="- Retirar", width=70, fg_color="#1e2536",
+                                           hover_color="#ef5350", font=(self.F_BODY, 11, "bold"), height=26,
+                                           command=self.retirar_carga_actual)
+        btn_retirar_carga.pack(side="left", padx=(0, 10))
+
+        self.btn_fase = ctk.CTkButton(table_actions, text="Pasar a Venta", fg_color="#e3a53c", text_color="#12141c", font=(self.F_BODY, 11, "bold"), width=120, height=26, command=self.activar_fase_venta)
+        self.btn_fase.pack(side="right", padx=5)
+
+        self.btn_regresar = ctk.CTkButton(table_actions, text="Cancelar Venta", fg_color="#ef5350", text_color="#eef1f8", font=(self.F_BODY, 11, "bold"), width=120, height=26, command=self.regresar_fase_compra)
+
+        btn_add = ctk.CTkButton(table_actions, text="+ Meter Ítem", fg_color="#48c9dc", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=110, command=self.add_item_row)
+        btn_add.pack(side="right", padx=5)
+
+        btn_pdf = ctk.CTkButton(table_actions, text="Generar PDF", fg_color="#3ddc84", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=140, command=self.export_to_pdf)
+        btn_pdf.pack(side="right", padx=5)
+
+        btn_csv = ctk.CTkButton(table_actions, text="Exportar CSV", fg_color="#97a2bd", text_color="#12141c", font=(self.F_DISPLAY, 13, "bold"), width=130, command=self.export_to_csv)
+        btn_csv.pack(side="right", padx=5)
+
+        btn_vista_gremio = ctk.CTkButton(table_actions, text="Vista Gremio", fg_color=ACCENT_TEAL, text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=120, command=self.exportar_vista_gremio)
+        btn_vista_gremio.pack(side="right", padx=5)
+
+        btn_archivar = ctk.CTkButton(table_actions, text="Archivar al Historial", fg_color="#e3a53c", text_color="#12141c", font=(self.F_DISPLAY, 12, "bold"), width=170, command=self.archivar_carga)
+        btn_archivar.pack(side="right", padx=5)
+
+        table_toolbar2 = ctk.CTkFrame(panel, fg_color="transparent")
+        table_toolbar2.pack(fill="x", padx=20, pady=(0, 6))
+
+        ctk.CTkLabel(table_toolbar2, text="Buscar:", font=(self.F_BODY, 14), text_color="#97a2bd").pack(side="left", padx=(0, 4))
+        self.ent_buscar_item = ctk.CTkEntry(table_toolbar2, placeholder_text="Nombre del ítem...", width=260,
+                                             fg_color="#0d111c", text_color="#eef1f8")
+        self.ent_buscar_item.pack(side="left")
+        self.ent_buscar_item.bind("<KeyRelease>", lambda e: self.filtrar_tabla())
+
+        btn_copiar_lista = ctk.CTkButton(table_toolbar2, text="Copiar Lista", width=120, fg_color="#1e2536",
+                                          hover_color=ACCENT_ICE, text_color="#eef1f8", font=(self.F_BODY, 12, "bold"),
+                                          command=self.copiar_lista_portapapeles)
+        btn_copiar_lista.pack(side="left", padx=(10, 0))
+
+        self.lbl_contador_estados = ctk.CTkLabel(table_toolbar2, text="", font=(self.F_MONO, 13, "bold"), text_color="#97a2bd")
+        self.lbl_contador_estados.pack(side="right", padx=5)
+
+        table_toolbar3 = ctk.CTkFrame(panel, fg_color="transparent")
+        table_toolbar3.pack(fill="x", padx=20, pady=(0, 10))
+        ctk.CTkLabel(table_toolbar3, text="Filtro rápido:", font=(self.F_BODY, 12, "bold"), text_color="#97a2bd").pack(side="left", padx=(0, 8))
+        self.filtro_estado_actual = "Todo"
+        self._botones_filtro_estado = {}
+        for etiqueta, estado_clave, color in (
+            ("Todo", "Todo", "#97a2bd"),
+            ("Recibido", "✓ Recibido", "#3ddc84"),
+            ("En Proceso", "⚙ En Proceso", "#e3a53c"),
+            ("Cancelado", "✕ Cancelado", "#ef5350"),
+        ):
+            b = ctk.CTkButton(table_toolbar3, text=etiqueta, width=110, height=24, font=(self.F_BODY, 11, "bold"),
+                               fg_color="#1c2130" if etiqueta != "Todo" else color, text_color="#eef1f8" if etiqueta != "Todo" else "#12141c",
+                               hover_color=color, command=lambda e=estado_clave: self.aplicar_filtro_estado(e))
+            b.pack(side="left", padx=3)
+            self._botones_filtro_estado[estado_clave] = b
+
+        self.table_scroll = ctk.CTkScrollableFrame(panel, fg_color="#0d111c", corner_radius=10)
+        self.table_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+
+        headers_frame = ctk.CTkFrame(self.table_scroll, fg_color="transparent")
+        headers_frame.pack(fill="x", pady=(5, 10))
+        headers = ["★", "Estado", "Nombre del Ítem", "Cant.", "Tier", "Valor Compra O/C", "Precio de Venta", "Margen %", "OC"]
+        widths = [30, 130, 320, 70, 80, 170, 170, 100, 100]
+        for h, w in zip(headers, widths):
+            lbl = ctk.CTkLabel(headers_frame, text=h, font=(self.F_BODY, 14, "bold"), text_color="#97a2bd", width=w, anchor="w" if h not in ("Estado", "★") else "center")
+            lbl.pack(side="left", padx=4)
+
+        self.bind_mousewheel_recursive(self.table_scroll, self.table_scroll, orient="y")
+
+        self.refrescar_selector_cargas()
+        self.cargar_items_tabla()
+
+    def cargar_items_tabla(self):
+        """
+        Trae de la base de datos los ítems de la carga/hub actual y arma
+        las filas en la tabla. Se usa al construir la página 'Mi Carga' y
+        cada vez que cambiás de hub o de carga.
+        """
+        if not hasattr(self, "table_scroll"):
+            return
         for row in self.row_inputs:
             row["frame"].destroy()
         self.row_inputs.clear()
@@ -1063,10 +1058,53 @@ class AlbionCargoApp(ctk.CTk):
             (self.current_user_id, self.current_hub, self.current_carga)
         )
         items = cursor.fetchall()
+        conn.close()
         for item in items:
             self.create_row_ui(item)
 
-        # Limpieza obligatoria visual de esencias antes de cargar las nuevas (Evita cruce de precios entre ciudades)
+        self.refresh_manifest_label()
+        self.calculate_metrics()
+        self.actualizar_contador_estados()
+
+    # ------------------------------------------------------------------ #
+    # PÁGINA: RUNAS Y NOTAS
+    # ------------------------------------------------------------------ #
+    def build_pagina_runas_notas(self, parent):
+        columnas = ctk.CTkFrame(parent, fg_color="transparent")
+        columnas.pack(fill="both", expand=True)
+
+        izq = ctk.CTkFrame(columnas, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        izq.pack(side="left", fill="y", padx=(0, 15))
+
+        der = ctk.CTkFrame(columnas, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        der.pack(side="left", fill="both", expand=True)
+
+        ctk.CTkLabel(izq, text="Runas, Almas y Reliquias", font=(self.F_DISPLAY, 16, "bold"), text_color="#e3a53c").pack(pady=(18, 4), padx=20, anchor="w")
+        ctk.CTkLabel(izq, text=f"Guardadas para {self.current_hub}", font=(self.F_BODY, 12), text_color="#97a2bd").pack(pady=(0, 12), padx=20, anchor="w")
+
+        self.essence_scroll = ctk.CTkFrame(izq, fg_color="#0d111c", corner_radius=10)
+        self.essence_scroll.pack(padx=20, pady=(0, 20))
+        self.render_essence_inputs()
+
+        ctk.CTkLabel(der, text="Inteligencia de Zona / Notas Extra", font=(self.F_DISPLAY, 16, "bold"), text_color="#eef1f8").pack(pady=(18, 4), padx=20, anchor="w")
+        ctk.CTkLabel(der, text=f"Notas guardadas para {self.current_hub}", font=(self.F_BODY, 12), text_color="#97a2bd").pack(pady=(0, 12), padx=20, anchor="w")
+
+        self.txt_notes = ctk.CTkTextbox(der, fg_color="#0d111c", font=(self.F_BODY, 15), border_color="#2a3142", border_width=1)
+        self.txt_notes.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.txt_notes.bind("<KeyRelease>", lambda e: self.save_notes())
+
+        self.cargar_esencias_y_notas()
+
+    def cargar_esencias_y_notas(self):
+        """
+        Trae de la base de datos las esencias y las notas del hub actual y
+        las pone en los campos. Se usa al construir la página 'Runas y
+        Notas' y cada vez que cambiás de ciudad.
+        """
+        if not hasattr(self, "essence_inputs") or not self.essence_inputs:
+            return
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
         for t in range(4, 9):
             self.essence_inputs[f"r_t{t}"].delete(0, "end")
             self.essence_inputs[f"r_t{t}"].insert(0, "0")
@@ -1074,8 +1112,6 @@ class AlbionCargoApp(ctk.CTk):
             self.essence_inputs[f"a_t{t}"].insert(0, "0")
             self.essence_inputs[f"re_t{t}"].delete(0, "end")
             self.essence_inputs[f"re_t{t}"].insert(0, "0")
-
-        for t in range(4, 9):
             cursor.execute("SELECT runas, almas, reliquias FROM esencias WHERE user_id = ? AND hub = ? AND tier = ?", (self.current_user_id, self.current_hub, t))
             esc = cursor.fetchone()
             if esc:
@@ -1087,51 +1123,15 @@ class AlbionCargoApp(ctk.CTk):
                 self.essence_inputs[f"re_t{t}"].delete(0, "end")
                 self.essence_inputs[f"re_t{t}"].insert(0, str(re))
 
-        # --- Config de destino / ruta / transporte / mochila de ESTE hub (persiste siempre, pedido #12 y #5) ---
-        cursor.execute("SELECT destino, ruta_tipo, costo_transporte, valor_mochila FROM config_hub WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
-        cfg = cursor.fetchone()
-        if cfg:
-            destino_guardado, ruta_guardada, costo_guardado, mochila_guardada = cfg
-        else:
-            destino_guardado, ruta_guardada, costo_guardado, mochila_guardada = DESTINO_MERCADO, "", 0.0, 0.0
-
-        self.current_destino = destino_guardado or DESTINO_MERCADO
-        self.sel_destino.set(self.current_destino)
-
-        if self.current_hub == "Caerleon":
-            # Caerleon ya ES el Mercado Negro: no aplica el sub-selector de portal/ciudad.
-            self.lbl_ruta.pack_forget()
-            self.sel_ruta.pack_forget()
-            self.current_ruta_tipo = ""
-        else:
-            opciones_ruta = [self.current_hub, f"{self.current_hub} Portal"]
-            self.sel_ruta.configure(values=opciones_ruta)
-            self.current_ruta_tipo = ruta_guardada if ruta_guardada in opciones_ruta else self.current_hub
-            self.sel_ruta.set(self.current_ruta_tipo)
-            self.lbl_ruta.pack(side="left", padx=(20, 10), pady=15)
-            self.sel_ruta.pack(side="left", padx=5, pady=15)
-
-        self.ent_costo_transporte.delete(0, "end")
-        self.ent_costo_transporte.insert(0, str(int(costo_guardado)))
-        # Valor de Mochila persistente (idea nueva #5): se recuerda por hub
-        # aunque cierres y abras la app de nuevo.
-        self.ent_mochila_global.delete(0, "end")
-        self.ent_mochila_global.insert(0, str(int(mochila_guardada)))
-        self.update_destino_ui()
-        self.refresh_manifest_label()
-
-        cursor.execute("SELECT texto FROM notas WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
-        nota = cursor.fetchone()
-        self.txt_notes.delete("1.0", "end")
-        if nota:
-            self.txt_notes.insert("1.0", nota[0])
+        if hasattr(self, "txt_notes") and self.txt_notes.winfo_exists():
+            cursor.execute("SELECT texto FROM notas WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
+            nota = cursor.fetchone()
+            self.txt_notes.delete("1.0", "end")
+            if nota:
+                self.txt_notes.insert("1.0", nota[0])
         conn.close()
-        self.calculate_metrics()
-        self.refresh_historial_tab()
 
     def create_row_ui(self, db_row=None):
-        # CAMBIO PEDIDO #1: una fila nueva ahora arranca en "⚙ En Proceso" en vez
-        # de "✓ Recibido" (antes se le pasaba "checked" como default acá).
         if db_row:
             db_id, status, nombre, cantidad, tier, valor_oc, precio_mn, favorito, oc_timestamp = db_row
         else:
@@ -1143,8 +1143,6 @@ class AlbionCargoApp(ctk.CTk):
         row_frame = ctk.CTkFrame(self.table_scroll, fg_color=row_bg, corner_radius=8)
         row_frame.pack(fill="x", pady=5, padx=2)
 
-        # Favorito / tag de ítem rentable (idea nueva: calidad de vida). Es solo
-        # un toggle visual + guardado en DB, no afecta ningún cálculo.
         fav_var = {"on": bool(favorito)}
         btn_fav = ctk.CTkButton(row_frame, text=("★" if fav_var["on"] else "☆"), width=30, corner_radius=8,
                                  fg_color="transparent", hover_color="#e3a53c",
@@ -1164,18 +1162,17 @@ class AlbionCargoApp(ctk.CTk):
 
         def on_status_change(value, sel=status_sel):
             sel.configure(fg_color=STATUS_COLORS.get(value, "#232838"))
-            # CAMBIO PEDIDO #3: el habilitado/deshabilitado del precio MN depende
-            # del estado de ESTA fila (solo Recibido se puede tocar en venta).
             self.aplicar_bloqueo_precio_mn(self.row_inputs_lookup(sel))
             self.sync_and_calc()
 
         status_sel.configure(command=on_status_change)
         status_sel.pack(side="left", padx=4)
 
-        ent_nombre = ctk.CTkEntry(row_frame, width=300, placeholder_text="Nombre Ítem...", fg_color="#0d111c", text_color="#eef1f8")
+        ent_nombre = ctk.CTkEntry(row_frame, width=320, placeholder_text="Nombre Ítem...", fg_color="#0d111c", text_color="#eef1f8")
         ent_nombre.insert(0, nombre)
         ent_nombre.pack(side="left", padx=4)
         ent_nombre.bind("<KeyRelease>", lambda e: self.sync_and_calc())
+        ent_nombre.bind("<FocusOut>", lambda e, w=ent_nombre: self.corregir_nombre_item(w))
 
         ent_cant = ctk.CTkEntry(row_frame, width=70, fg_color="#0d111c", justify="center", text_color="#eef1f8")
         ent_cant.insert(0, str(cantidad))
@@ -1187,32 +1184,24 @@ class AlbionCargoApp(ctk.CTk):
         ent_tier.pack(side="left", padx=4)
         ent_tier.bind("<KeyRelease>", lambda e: self.sync_and_calc())
 
-        ent_oc = ctk.CTkEntry(row_frame, width=160, fg_color="#0d111c", text_color="#48c9dc")
-        ent_oc.insert(0, str(int(valor_oc)))
+        ent_oc = ctk.CTkEntry(row_frame, width=170, fg_color="#0d111c", text_color="#48c9dc")
+        ent_oc.insert(0, f"{int(valor_oc):,}")
         ent_oc.pack(side="left", padx=4)
         ent_oc.bind("<KeyRelease>", lambda e: self.sync_and_calc())
+        ent_oc.bind("<FocusOut>", lambda e, w=ent_oc: (self.formatear_numero_visual(w), self.sync_and_calc()))
 
-        # El estado inicial del campo MN se resuelve más abajo con
-        # aplicar_bloqueo_precio_mn, una vez que la fila ya está en row_inputs.
-        # CAMBIO PEDIDO #4: arranca en "readonly" en vez de "disabled" para que
-        # su contenido siga siendo seleccionable/copiable con el mouse aunque
-        # esté bloqueado para edición.
-        ent_mn = ctk.CTkEntry(row_frame, width=160, fg_color="#232838", text_color="#3ddc84", state="readonly")
+        ent_mn = ctk.CTkEntry(row_frame, width=170, fg_color="#232838", text_color="#3ddc84", state="readonly")
         ent_mn.configure(state="normal")
-        ent_mn.insert(0, str(int(precio_mn)))
+        ent_mn.insert(0, f"{int(precio_mn):,}")
         ent_mn.configure(state="readonly")
         ent_mn.pack(side="left", padx=4)
         ent_mn.bind("<KeyRelease>", lambda e: self.sync_and_calc())
+        ent_mn.bind("<FocusOut>", lambda e, w=ent_mn: (self.formatear_numero_visual(w), self.sync_and_calc()))
 
-        # Margen % por fila (idea nueva): ganancia real de ESE ítem puntual,
-        # no solo el total de la carga. Se recalcula solo, no se edita a mano.
-        lbl_margen = ctk.CTkLabel(row_frame, text="---", width=90, font=(self.F_MONO, 13, "bold"), text_color="#97a2bd", anchor="center")
+        lbl_margen = ctk.CTkLabel(row_frame, text="---", width=100, font=(self.F_MONO, 13, "bold"), text_color="#97a2bd", anchor="center")
         lbl_margen.pack(side="left", padx=4)
 
-        # Indicador de expiración de la Orden de Compra DE ESTA FILA puntual
-        # (idea nueva): cada ítem guarda su propio oc_timestamp, así que si
-        # compraste cosas en momentos distintos, cada una avisa por separado.
-        lbl_oc_fila = ctk.CTkLabel(row_frame, text="", width=90, font=(self.F_MONO, 11, "bold"), text_color="#97a2bd", anchor="center")
+        lbl_oc_fila = ctk.CTkLabel(row_frame, text="", width=100, font=(self.F_MONO, 11, "bold"), text_color="#97a2bd", anchor="center")
         lbl_oc_fila.pack(side="left", padx=4)
 
         btn_del = ctk.CTkButton(row_frame, text="✕", width=35, corner_radius=8, fg_color="transparent", hover_color="#ef5350", text_color="#97a2bd", font=(self.F_BODY, 14, "bold"), command=lambda: self.delete_row(db_id, row_frame))
@@ -1225,38 +1214,23 @@ class AlbionCargoApp(ctk.CTk):
             "lbl_margen": lbl_margen, "lbl_oc_fila": lbl_oc_fila, "oc_timestamp": oc_timestamp,
         }
         self.row_inputs.append(row_data)
-
-        # Ahora que la fila ya está registrada, aplicamos el bloqueo correcto
-        # según fase de venta + estado de la fila (pedido #3).
         self.aplicar_bloqueo_precio_mn(row_data)
 
-        # Navegación tipo Excel con las flechas del teclado (pedido #6)
         for key, widget in (("nombre", ent_nombre), ("cantidad", ent_cant), ("tier", ent_tier), ("valor_oc", ent_oc), ("precio_mn", ent_mn)):
             widget.bind("<Up>", lambda e, w=widget: self.move_focus_table(w, -1, 0))
             widget.bind("<Down>", lambda e, w=widget: self.move_focus_table(w, 1, 0))
             widget.bind("<Left>", lambda e, w=widget: self.move_focus_table(w, 0, -1))
             widget.bind("<Right>", lambda e, w=widget: self.move_focus_table(w, 0, 1))
 
-        # Rueda del mouse sobre esta fila también scrollea la tabla (pedido nuevo)
         self.bind_mousewheel_recursive(row_frame, self.table_scroll, orient="y")
 
     def row_inputs_lookup(self, status_widget):
-        # Encuentra el dict de row_inputs correspondiente a un OptionMenu de estado.
         for row in self.row_inputs:
             if row["status"] is status_widget:
                 return row
         return None
 
     def aplicar_bloqueo_precio_mn(self, row):
-        """
-        CAMBIO PEDIDO #3: decide si el campo 'Precio de Venta (MN)' de una fila
-        se puede editar. Regla: solo es editable si (a) la fase de venta está
-        activa Y (b) el estado de ESA fila puntual es "✓ Recibido". Si la fila
-        está "⚙ En Proceso" o "✕ Cancelado", el campo queda bloqueado sin
-        importar la fase — y su estado NO se toca ni se fuerza a otra cosa.
-        CAMBIO PEDIDO #4: usamos "readonly" en vez de "disabled" para que el
-        campo bloqueado siga siendo seleccionable/copiable con el mouse.
-        """
         if row is None:
             return
         estado = row["status"].get()
@@ -1318,21 +1292,15 @@ class AlbionCargoApp(ctk.CTk):
         return "break"
 
     def activar_fase_venta(self):
-        # CAMBIO PEDIDO #3: al pasar a fase de venta, los estados de TODAS las
-        # filas se quedan exactamente como estaban (cancelado sigue cancelado,
-        # en proceso sigue en proceso, recibido sigue recibido). Ya NO se
-        # fuerza "En Proceso" -> "Recibido" automáticamente como antes.
         if not self.row_inputs:
-            messagebox.showwarning("Carga Vacía", "No tienes ningún ítem registrado.")
+            self.dialogo_warning("Carga Vacía", "No tenés ningún ítem cargado.")
             return
 
         self.fase_venta_activa = True
         for row in self.row_inputs:
-            # Solo aplicamos el bloqueo/desbloqueo del campo MN según el estado
-            # real de cada fila; no tocamos el estado en sí.
             self.aplicar_bloqueo_precio_mn(row)
 
-        self.btn_fase.configure(text="Venta Activa ✓", fg_color="#3ddc84")
+        self.btn_fase.configure(text="Venta Activa", fg_color="#3ddc84")
         self.btn_regresar.pack(side="right", padx=5)
         self.sync_and_calc()
 
@@ -1341,7 +1309,7 @@ class AlbionCargoApp(ctk.CTk):
         for row in self.row_inputs:
             self.aplicar_bloqueo_precio_mn(row)
 
-        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
+        self.btn_fase.configure(text="Pasar a Venta", fg_color="#e3a53c")
         self.btn_regresar.pack_forget()
         self.sync_and_calc()
 
@@ -1352,31 +1320,31 @@ class AlbionCargoApp(ctk.CTk):
 
     def render_essence_inputs(self):
         h_frame = ctk.CTkFrame(self.essence_scroll, fg_color="transparent")
-        h_frame.pack(fill="x", pady=6)
-        ctk.CTkLabel(h_frame, text="T", width=24, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=3)
-        ctk.CTkLabel(h_frame, text="Runas", width=66, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=3)
-        ctk.CTkLabel(h_frame, text="Almas", width=66, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=3)
-        ctk.CTkLabel(h_frame, text="Reliquias", width=80, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=3)
+        h_frame.pack(fill="x", pady=6, padx=6)
+        ctk.CTkLabel(h_frame, text="T", width=40, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=4)
+        ctk.CTkLabel(h_frame, text="Runas", width=110, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=4)
+        ctk.CTkLabel(h_frame, text="Almas", width=110, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=4)
+        ctk.CTkLabel(h_frame, text="Reliquias", width=110, font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(side="left", padx=4)
 
         for t in range(4, 9):
             row = ctk.CTkFrame(self.essence_scroll, fg_color="transparent")
-            row.pack(fill="x", pady=4)
+            row.pack(fill="x", pady=4, padx=6)
 
-            ctk.CTkLabel(row, text=f"T{t}", width=24, font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c").pack(side="left", padx=3)
+            ctk.CTkLabel(row, text=f"T{t}", width=40, font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c").pack(side="left", padx=4)
 
-            r_in = ctk.CTkEntry(row, width=66, fg_color="#0d111c", justify="center", text_color="#eef1f8")
+            r_in = ctk.CTkEntry(row, width=110, fg_color="#0d111c", justify="center", text_color="#eef1f8")
             r_in.insert(0, "0")
-            r_in.pack(side="left", padx=3)
+            r_in.pack(side="left", padx=4)
             r_in.bind("<KeyRelease>", lambda e: self.save_esencias_and_calc())
 
-            a_in = ctk.CTkEntry(row, width=66, fg_color="#0d111c", justify="center", text_color="#eef1f8")
+            a_in = ctk.CTkEntry(row, width=110, fg_color="#0d111c", justify="center", text_color="#eef1f8")
             a_in.insert(0, "0")
-            a_in.pack(side="left", padx=3)
+            a_in.pack(side="left", padx=4)
             a_in.bind("<KeyRelease>", lambda e: self.save_esencias_and_calc())
 
-            re_in = ctk.CTkEntry(row, width=80, fg_color="#0d111c", justify="center", text_color="#eef1f8")
+            re_in = ctk.CTkEntry(row, width=110, fg_color="#0d111c", justify="center", text_color="#eef1f8")
             re_in.insert(0, "0")
-            re_in.pack(side="left", padx=3)
+            re_in.pack(side="left", padx=4)
             re_in.bind("<KeyRelease>", lambda e: self.save_esencias_and_calc())
 
             self.essence_inputs[f"r_t{t}"] = r_in
@@ -1435,37 +1403,86 @@ class AlbionCargoApp(ctk.CTk):
         self.actualizar_contador_estados()
 
     def actualizar_contador_estados(self):
-        """
-        Idea nueva: cuenta cuántas filas hay en cada estado (Recibido / En
-        Proceso / Cancelado) y lo muestra como un resumen rápido arriba de
-        la tabla, para ver de un vistazo cómo va la carga sin tener que
-        contar fila por fila.
-        """
-        if not hasattr(self, "lbl_contador_estados"):
+        if not hasattr(self, "lbl_contador_estados") or not self.lbl_contador_estados.winfo_exists():
             return
         recibidos = sum(1 for r in self.row_inputs if r["status"].get() == "✓ Recibido")
         procesos = sum(1 for r in self.row_inputs if r["status"].get() == "⚙ En Proceso")
         cancelados = sum(1 for r in self.row_inputs if r["status"].get() == "✕ Cancelado")
         self.lbl_contador_estados.configure(
-            text=f"✓ {recibidos} Recibidos   ⚙ {procesos} En Proceso   ✕ {cancelados} Cancelados"
+            text=f"{recibidos} Recibidos   {procesos} En Proceso   {cancelados} Cancelados"
         )
 
     def filtrar_tabla(self):
-        """
-        Idea nueva: buscador rápido. Mientras escribís en el campo de
-        búsqueda, oculta (sin borrar nada de la base de datos) las filas
-        cuyo nombre no contenga el texto buscado. Vaciar el campo vuelve a
-        mostrar todo.
-        """
         texto = normalizar_texto(self.ent_buscar_item.get())
+        filtro = getattr(self, "filtro_estado_actual", "Todo")
         for row in self.row_inputs:
             nombre_norm = normalizar_texto(row["nombre"].get())
-            if texto == "" or texto in nombre_norm:
+            coincide_texto = (texto == "" or texto in nombre_norm)
+            coincide_estado = (filtro == "Todo" or row["status"].get() == filtro)
+            if coincide_texto and coincide_estado:
                 row["frame"].pack(fill="x", pady=5, padx=2)
             else:
                 row["frame"].pack_forget()
 
+    def aplicar_filtro_estado(self, estado_clave):
+        self.filtro_estado_actual = estado_clave
+        colores = {"Todo": "#97a2bd", "✓ Recibido": "#3ddc84", "⚙ En Proceso": "#e3a53c", "✕ Cancelado": "#ef5350"}
+        for clave, btn in self._botones_filtro_estado.items():
+            activo = (clave == estado_clave)
+            btn.configure(fg_color=colores[clave] if activo else "#1c2130",
+                           text_color="#12141c" if activo else "#eef1f8")
+        self.filtrar_tabla()
+
+    def copiar_lista_portapapeles(self):
+        lineas = []
+        for row in self.row_inputs:
+            if row["status"].get() == "✕ Cancelado":
+                continue
+            nombre = row["nombre"].get().strip() or "(sin nombre)"
+            cantidad = row["cantidad"].get()
+            tier = row["tier"].get().strip()
+            tier_txt = f" {tier}" if tier else ""
+            lineas.append(f"- {cantidad} {nombre}{tier_txt}")
+
+        if not lineas:
+            self.dialogo_warning("Nada para copiar", "No hay ítems activos en la tabla.")
+            return
+
+        texto = "\n".join(lineas)
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(texto)
+            self.dialogo_info("Copiado", f"Se copió tu lista de {len(lineas)} ítem(s) al portapapeles.")
+        except Exception as ex:
+            self.dialogo_error("Error", f"No se pudo copiar al portapapeles:\n{ex}")
+
+    def corregir_nombre_item(self, entry_widget):
+        texto_actual = entry_widget.get().strip()
+        if not texto_actual:
+            return
+        texto_formateado = " ".join(p.capitalize() if p.isalpha() else p for p in texto_actual.split(" "))
+
+        normalizado = normalizar_texto(texto_formateado)
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT nombre FROM banco_items WHERE user_id = ?", (self.current_user_id,))
+        nombres_previos = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        texto_final = texto_formateado
+        for nombre_previo in nombres_previos:
+            if normalizar_texto(nombre_previo) == normalizado:
+                texto_final = nombre_previo
+                break
+
+        if texto_final != texto_actual:
+            entry_widget.delete(0, "end")
+            entry_widget.insert(0, texto_final)
+            self.sync_and_calc()
+
     def save_esencias_and_calc(self):
+        if not self.essence_inputs:
+            return
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         for t in range(4, 9):
@@ -1478,8 +1495,12 @@ class AlbionCargoApp(ctk.CTk):
             ''', (self.current_user_id, self.current_hub, t, r, a, re))
         conn.commit()
         conn.close()
+        if hasattr(self, "lbl_costo_materiales"):
+            self.calcular_costo_materiales()
 
     def save_notes(self):
+        if not hasattr(self, "txt_notes") or not self.txt_notes.winfo_exists():
+            return
         texto = self.txt_notes.get("1.0", "end-1c")
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -1488,16 +1509,13 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
 
     def delete_row(self, db_id, frame_widget):
-        # Idea nueva: confirmación antes de borrar -- evita perder una fila
-        # por un click de más. Buscamos el nombre para que el mensaje sea
-        # concreto en vez de un genérico "¿estás seguro?".
         nombre_item = ""
         for row in self.row_inputs:
             if row["db_id"] == db_id and row["frame"] is frame_widget:
                 nombre_item = row["nombre"].get().strip()
                 break
         etiqueta = f'"{nombre_item}"' if nombre_item else "este ítem"
-        if not messagebox.askyesno("Confirmar Borrado", f"¿Seguro que querés borrar {etiqueta}? Esto no se puede deshacer."):
+        if not self.confirmar_dialogo("Confirmar Borrado", f"¿Seguro que querés borrar {etiqueta}? Esto no se puede deshacer."):
             return
 
         if db_id:
@@ -1515,21 +1533,64 @@ class AlbionCargoApp(ctk.CTk):
         self.current_hub = chosen_hub
         self.current_carga = "Carga 1"
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
-        self.btn_regresar.pack_forget()
-        self.refrescar_selector_cargas()
         self.load_hub_data()
 
+    def load_hub_data(self):
+        """
+        Función central que se llama cada vez que cambiás de hub o de
+        carga: recarga la config de esa ciudad (destino/ruta/mochila/etc,
+        que siempre están visibles arriba) y reconstruye la página que
+        tengas abierta en ese momento con los datos correctos.
+        """
+        self.cargar_config_hub_actual()
+        self.mostrar_pagina(self.pagina_actual)
+
+    def cargar_config_hub_actual(self):
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT destino, ruta_tipo, costo_transporte, valor_mochila FROM config_hub WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
+        cfg = c.fetchone()
+        conn.close()
+        if cfg:
+            destino_g, ruta_g, costo_g, mochila_g = cfg
+        else:
+            destino_g, ruta_g, costo_g, mochila_g = DESTINO_MERCADO, "", 0.0, 0.0
+
+        self.current_destino = destino_g or DESTINO_MERCADO
+        self.sel_destino.set(self.current_destino)
+
+        if self.current_hub == "Caerleon":
+            self.lbl_ruta.pack_forget()
+            self.sel_ruta.pack_forget()
+            self.current_ruta_tipo = ""
+        else:
+            opciones_ruta = [self.current_hub, f"{self.current_hub} Portal"]
+            self.sel_ruta.configure(values=opciones_ruta)
+            self.current_ruta_tipo = ruta_g if ruta_g in opciones_ruta else self.current_hub
+            self.sel_ruta.set(self.current_ruta_tipo)
+            self.lbl_ruta.pack(side="left", padx=(20, 10), pady=15)
+            self.sel_ruta.pack(side="left", padx=5, pady=15)
+
+        self.ent_costo_transporte.delete(0, "end")
+        self.ent_costo_transporte.insert(0, f"{int(costo_g):,}")
+        self.ent_mochila_global.delete(0, "end")
+        self.ent_mochila_global.insert(0, f"{int(mochila_g):,}")
+        if hasattr(self, "ent_impuesto_retorno") and self.ent_impuesto_retorno.winfo_exists():
+            self.ent_impuesto_retorno.delete(0, "end")
+            self.ent_impuesto_retorno.insert(0, "0")
+        self.update_destino_ui()
+        self.refresh_manifest_label()
+
+    def refresh_manifest_label(self):
+        if not hasattr(self, "lbl_manifest") or not self.lbl_manifest.winfo_exists():
+            return
+        ruta_txt = f" ({self.current_ruta_tipo})" if self.current_ruta_tipo and self.current_hub != "Caerleon" else ""
+        self.set_display_text(self.lbl_manifest, f"Ruta: {self.current_hub}{ruta_txt} → {self.current_destino}")
+
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: CARGAS PARALELAS DENTRO DEL MISMO HUB
+    # CARGAS PARALELAS DENTRO DEL MISMO HUB
     # ------------------------------------------------------------------ #
     def refrescar_selector_cargas(self):
-        """
-        Trae del catálogo cargas_meta todas las "cargas" nombradas que
-        existen para el hub actual. Si no hay ninguna (primera vez en ese
-        hub), crea "Carga 1" automáticamente para que el selector nunca
-        quede vacío.
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute("SELECT carga_nombre FROM cargas_meta WHERE user_id = ? AND hub = ? ORDER BY id", (self.current_user_id, self.current_hub))
@@ -1542,23 +1603,16 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
         if self.current_carga not in nombres:
             self.current_carga = nombres[0]
-        if hasattr(self, "sel_carga"):
+        if hasattr(self, "sel_carga") and self.sel_carga.winfo_exists():
             self.sel_carga.configure(values=nombres)
             self.sel_carga.set(self.current_carga)
 
     def change_carga(self, nombre):
         self.current_carga = nombre
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
-        self.btn_regresar.pack_forget()
-        self.load_hub_data()
+        self.cargar_items_tabla()
 
     def crear_nueva_carga(self):
-        """
-        Pide un nombre nuevo de carga (ej. "Carga 2") y la agrega al
-        catálogo de este hub, dejando la tabla vacía lista para meter
-        ítems sin tocar los de la carga anterior.
-        """
         import tkinter.simpledialog as simpledialog
         nombre = simpledialog.askstring("Nueva Carga", "Nombre para la nueva carga (ej. 'Carga 2'):", parent=self)
         if not nombre:
@@ -1573,23 +1627,38 @@ class AlbionCargoApp(ctk.CTk):
                       (self.current_user_id, self.current_hub, nombre))
             conn.commit()
         except sqlite3.IntegrityError:
-            messagebox.showwarning("Ya existe", f"Ya hay una carga llamada '{nombre}' en este hub.")
+            self.dialogo_warning("Ya existe", f"Ya hay una carga llamada '{nombre}' en este hub.")
             conn.close()
             return
         conn.close()
         self.current_carga = nombre
         self.fase_venta_activa = False
-        self.btn_fase.configure(text="✓ Pasar a Venta", fg_color="#e3a53c")
-        self.btn_regresar.pack_forget()
         self.refrescar_selector_cargas()
-        self.load_hub_data()
+        self.cargar_items_tabla()
+
+    def retirar_carga_actual(self):
+        nombre_a_borrar = self.current_carga
+        if not self.confirmar_dialogo(
+            "Retirar Carga",
+            f"¿Seguro? Esto borra TODOS los ítems de '{nombre_a_borrar}' en {self.current_hub}. No se puede deshacer."
+        ):
+            return
+
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("DELETE FROM inventario WHERE user_id = ? AND hub = ? AND carga_nombre = ?",
+                  (self.current_user_id, self.current_hub, nombre_a_borrar))
+        c.execute("DELETE FROM cargas_meta WHERE user_id = ? AND hub = ? AND carga_nombre = ?",
+                  (self.current_user_id, self.current_hub, nombre_a_borrar))
+        conn.commit()
+        conn.close()
+
+        self.fase_venta_activa = False
+        self.refrescar_selector_cargas()
+        self.cargar_items_tabla()
+        self.dialogo_info("Carga Retirada", f"Listo, '{nombre_a_borrar}' ya no existe.")
 
     def actualizar_oc_por_fila(self):
-        """
-        Actualiza el mini-indicador de expiración de OC (24h) de cada fila
-        de la tabla, usando el oc_timestamp propio de esa fila (no el
-        "Inicio Carga/Compra" global). Se llama junto con el reloj en vivo.
-        """
         for row in self.row_inputs:
             lbl = row.get("lbl_oc_fila")
             ts = row.get("oc_timestamp")
@@ -1602,22 +1671,29 @@ class AlbionCargoApp(ctk.CTk):
                 continue
             restante = (inicio + timedelta(hours=OC_EXPIRA_HORAS)) - datetime.now()
             if restante.total_seconds() <= 0:
-                lbl.configure(text="⚠ Expiró", text_color="#ef5350")
+                lbl.configure(text="Expiró", text_color="#ef5350")
             else:
                 horas = int(restante.total_seconds() // 3600)
                 minutos = int((restante.total_seconds() % 3600) // 60)
                 color = "#e3a53c" if restante.total_seconds() > 3600 else "#ef5350"
                 lbl.configure(text=f"{horas}h {minutos}m", text_color=color)
 
+            try:
+                horas_transcurridas = (datetime.now() - inicio).total_seconds() / 3600
+                atascada = row["status"].get() == "⚙ En Proceso" and horas_transcurridas > HORAS_OC_ATASCADA
+                frame = row.get("frame")
+                if frame is not None and frame.winfo_exists():
+                    if atascada:
+                        frame.configure(fg_color="#3a2a12", border_color="#e3a53c", border_width=1)
+                    else:
+                        frame.configure(border_width=0)
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------ #
-    # INICIO CARGA/COMPRA (persiste entre reinicios, pedido nuevo #5)
+    # INICIO CARGA/COMPRA
     # ------------------------------------------------------------------ #
     def cargar_inicio_carga(self):
-        """
-        Devuelve la hora de "Inicio Carga/Compra" guardada para este usuario
-        en config_general. Si nunca se guardó nada (primera vez), usa la
-        hora actual como punto de partida.
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute("SELECT inicio_carga FROM config_general WHERE user_id = ?", (self.current_user_id,))
@@ -1640,11 +1716,6 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
 
     def reiniciar_inicio_carga(self):
-        """
-        Reinicia el reloj de "Inicio Carga/Compra" a la hora actual. Se llama
-        SOLO después de exportar un PDF o un CSV con éxito (pedido nuevo #5):
-        cerrar/abrir la app, cambiar de ciudad, etc. nunca lo tocan.
-        """
         nuevo = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.ent_start_time.delete(0, "end")
         self.ent_start_time.insert(0, nuevo)
@@ -1652,7 +1723,7 @@ class AlbionCargoApp(ctk.CTk):
         self.update_oc_expira_label()
 
     # ------------------------------------------------------------------ #
-    # DESTINO / RUTA / PREMIUM (persisten en config_hub y usuarios)
+    # DESTINO / RUTA / PREMIUM
     # ------------------------------------------------------------------ #
     def update_destino_ui(self):
         if self.current_destino == DESTINO_HIDEOUT:
@@ -1698,11 +1769,6 @@ class AlbionCargoApp(ctk.CTk):
         self.calculate_metrics()
 
     def guardar_valor_mochila(self):
-        """
-        Persiste el "Valor de la Mochila" (idea nueva #5): antes se perdía
-        al cerrar la app; ahora se guarda por hub igual que el resto de la
-        configuración de esa ciudad.
-        """
         self._guardar_config_hub(valor_mochila=self.get_float(self.ent_mochila_global.get()))
         self.calculate_metrics()
 
@@ -1716,7 +1782,7 @@ class AlbionCargoApp(ctk.CTk):
         self.calculate_metrics()
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: BACKUP DE DB (Calidad de vida)
+    # BACKUP DE DB
     # ------------------------------------------------------------------ #
     def backup_database(self):
         try:
@@ -1730,9 +1796,9 @@ class AlbionCargoApp(ctk.CTk):
             if not destino:
                 return
             shutil.copyfile(DB_NAME, destino)
-            messagebox.showinfo("Backup Completo", f"Copia de seguridad guardada en:\n{destino}")
+            self.dialogo_info("Backup Completo", f"Copia de seguridad guardada en:\n{destino}")
         except Exception as ex:
-            messagebox.showerror("Error de Backup", f"No se pudo copiar la base de datos:\n{ex}")
+            self.dialogo_error("Error de Backup", f"No se pudo copiar la base de datos:\n{ex}")
 
     def restaurar_backup(self):
         try:
@@ -1742,24 +1808,24 @@ class AlbionCargoApp(ctk.CTk):
             )
             if not origen:
                 return
-            confirmar = messagebox.askyesno(
+            confirmar = self.confirmar_dialogo(
                 "Confirmar Restauración",
-                "Esto reemplaza TODA tu base de datos actual por la del backup elegido.\n"
-                "¿Seguro que querés continuar? Se recomienda cerrar y reabrir la app después."
+                "Esto reemplaza TODA tu base de datos actual por la del backup elegido. "
+                "¿Seguro que querés seguir? Se recomienda cerrar y reabrir la app después."
             )
             if not confirmar:
                 return
             shutil.copyfile(origen, DB_NAME)
-            messagebox.showinfo("Restauración Completa", "Backup restaurado. Cerrá y volvé a abrir la app para verlo reflejado.")
+            self.dialogo_info("Restauración Completa", "Backup restaurado. Cerrá y volvé a abrir la app para verlo reflejado.")
         except Exception as ex:
-            messagebox.showerror("Error de Restauración", f"No se pudo restaurar el backup:\n{ex}")
+            self.dialogo_error("Error de Restauración", f"No se pudo restaurar el backup:\n{ex}")
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: EXPORTAR A CSV/EXCEL
+    # EXPORTAR A CSV/EXCEL
     # ------------------------------------------------------------------ #
     def export_to_csv(self):
         if not self.row_inputs:
-            messagebox.showwarning("CSV Vacío", "No hay datos en la tabla para exportar.")
+            self.dialogo_warning("CSV Vacío", "No hay datos en la tabla para exportar.")
             return
         self.sync_and_calc()
 
@@ -1793,25 +1859,18 @@ class AlbionCargoApp(ctk.CTk):
                 writer.writerow(["Valor Mochila", int(m["mochila"])])
                 writer.writerow(["Profit Estimado", int(m["profit_est"])])
                 writer.writerow(["Profit Final", int(m["profit_final"])])
-            messagebox.showinfo("CSV Exportado", f"Archivo guardado exitosamente en:\n{filename}")
-            # CAMBIO PEDIDO #3 y #5: exportar CSV manda todo al Banco, vacía
-            # la carga activa y reinicia la hora de Inicio Carga/Compra.
-            conn_banco = sqlite3.connect(DB_NAME)
-            cursor_banco = conn_banco.cursor()
-            self._guardar_snapshot_banco(cursor_banco)
-            conn_banco.commit()
-            conn_banco.close()
+            self.dialogo_info("CSV Exportado", f"Archivo guardado exitosamente en:\n{filename}")
+            try:
+                self.archivar_carga_silenciosa()
+            except Exception:
+                pass
             self.vaciar_carga_actual()
-            if hasattr(self, "refrescar_banco_tab"):
-                self.refrescar_banco_tab()
-            if hasattr(self, "refrescar_favoritos_tab"):
-                self.refrescar_favoritos_tab()
             self.reiniciar_inicio_carga()
         except Exception as ex:
-            messagebox.showerror("Error CSV", f"No se pudo exportar:\n{ex}")
+            self.dialogo_error("Error CSV", f"No se pudo exportar:\n{ex}")
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: PESO DE CARGA VS CAPACIDAD DE MONTURA
+    # PESO DE CARGA VS CAPACIDAD DE MONTURA
     # ------------------------------------------------------------------ #
     def update_peso_ui(self):
         montura = self.sel_montura.get()
@@ -1834,36 +1893,32 @@ class AlbionCargoApp(ctk.CTk):
         pct = (peso / capacidad) * 100
         if pct <= 100:
             color = "#3ddc84"
-            texto = f"{pct:.0f}% de carga ✓"
+            texto = f"{pct:.0f}% de carga"
         elif pct <= 140:
             color = "#e3a53c"
-            texto = f"{pct:.0f}% ¡SOBRECARGA! (más lento)"
+            texto = f"{pct:.0f}% sobrecarga (más lento)"
         else:
             color = "#ef5350"
-            texto = f"{pct:.0f}% ¡NO PUEDE MOVERSE!"
+            texto = f"{pct:.0f}% no podés moverte"
         self.lbl_peso_status.configure(text=texto, text_color=color)
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: ETIQUETA DE RIESGO POR RUTA
+    # ETIQUETA DE RIESGO POR RUTA
     # ------------------------------------------------------------------ #
     def update_riesgo_ui(self):
         riesgo = self.sel_riesgo.get()
         multiplicadores = {
-            "🟢 Zona Segura": "Riesgo x1 (sin PvP)",
-            "🟡 Zona Amarilla": "Riesgo x2 (flag PvP opcional)",
-            "🔴 Zona Roja": "Riesgo x4 (PvP total, sin fama al morir)",
-            "⚫ Zona Negra": "Riesgo x8 (PvP total + gremios hostiles)",
+            "Zona Segura": "Riesgo x1 (sin PvP)",
+            "Zona Amarilla": "Riesgo x2 (flag PvP opcional)",
+            "Zona Roja": "Riesgo x4 (PvP total, sin fama al morir)",
+            "Zona Negra": "Riesgo x8 (PvP total + gremios hostiles)",
         }
         self.lbl_riesgo_mult.configure(text=multiplicadores.get(riesgo, ""))
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: AVISO DE EXPIRACIÓN DE ÓRDENES DE COMPRA (24H)
+    # AVISO DE EXPIRACIÓN DE ÓRDENES DE COMPRA (24H)
     # ------------------------------------------------------------------ #
     def update_oc_expira_label(self):
-        # Blindaje: el reloj en vivo llama a esta función cada segundo, y arranca
-        # a los pocos milisegundos de abrir el HUD -- antes de que existan estos
-        # widgets (se crean más abajo en show_main_hud). Si todavía no están
-        # listos, simplemente no hacemos nada esta vez.
         if not hasattr(self, "ent_start_time") or not hasattr(self, "lbl_oc_expira"):
             return
         try:
@@ -1874,44 +1929,119 @@ class AlbionCargoApp(ctk.CTk):
         expira = inicio + timedelta(hours=OC_EXPIRA_HORAS)
         restante = expira - datetime.now()
         if restante.total_seconds() <= 0:
-            self.lbl_oc_expira.configure(text="⚠ ÓRDENES DE COMPRA EXPIRADAS", text_color="#ef5350")
+            self.lbl_oc_expira.configure(text="Órdenes de Compra expiradas", text_color="#ef5350")
         else:
             horas = int(restante.total_seconds() // 3600)
             minutos = int((restante.total_seconds() % 3600) // 60)
             color = "#e3a53c" if restante.total_seconds() > 3600 else "#ef5350"
-            self.lbl_oc_expira.configure(text=f"⏳ OC expira en {horas}h {minutos}m", text_color=color)
+            self.lbl_oc_expira.configure(text=f"OC expira en {horas}h {minutos}m", text_color=color)
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: CALCULADORA DE REFINADO
+    # PÁGINA: VIAJE (Pánico, Impuesto de Retorno, Comparador Premium)
+    # ------------------------------------------------------------------ #
+    def build_tab_viaje(self, parent):
+        ctk.CTkLabel(parent, text="Antes y Durante el Viaje", font=(self.F_DISPLAY, 18, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Todo lo que sirve mirar antes de salir con la carga, o si te la pasás mal en el camino.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left").pack(padx=10, pady=(0, 15), anchor="w")
+
+        cols = ctk.CTkFrame(parent, fg_color="transparent")
+        cols.pack(fill="both", expand=True, padx=10)
+
+        col_izq = ctk.CTkFrame(cols, fg_color="transparent")
+        col_izq.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        col_der = ctk.CTkFrame(cols, fg_color="transparent")
+        col_der.pack(side="left", fill="both", expand=True, padx=(10, 0))
+
+        # --- Botón de Pánico ---
+        frame_panico = ctk.CTkFrame(col_izq, fg_color="#161a26", border_color="#ef5350", border_width=1, corner_radius=14)
+        frame_panico.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(frame_panico, text="Si me matan, ¿cuánto pierdo?", font=(self.F_DISPLAY, 15, "bold"), text_color="#ef5350").pack(anchor="w", padx=15, pady=(15, 6))
+        ctk.CTkLabel(frame_panico, text="Toma la inversión de la carga actual y tu profit promedio de las cargas archivadas, y te dice cuántos viajes buenos necesitás para recuperarte.",
+                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left", wraplength=460).pack(anchor="w", padx=15, pady=(0, 10))
+        btn_panico = ctk.CTkButton(frame_panico, text="Calcular Pérdida", fg_color="#ef5350", text_color="#eef1f8",
+                                    font=(self.F_BODY, 13, "bold"), command=self.calcular_boton_panico)
+        btn_panico.pack(padx=15, pady=(0, 10), anchor="w")
+        self.lbl_panico_resultado = ctk.CTkLabel(frame_panico, text="", font=(self.F_MONO, 13, "bold"), text_color="#ef5350", justify="left", wraplength=460)
+        self.lbl_panico_resultado.pack(anchor="w", padx=15, pady=(0, 15))
+
+        # --- Impuesto de Retorno ---
+        frame_retorno = ctk.CTkFrame(col_izq, fg_color="#161a26", border_color=ACCENT_ICE, border_width=1, corner_radius=14)
+        frame_retorno.pack(fill="x")
+        ctk.CTkLabel(frame_retorno, text="Impuesto de Retorno Rápido", font=(self.F_DISPLAY, 15, "bold"), text_color=ACCENT_ICE).pack(anchor="w", padx=15, pady=(15, 6))
+        ctk.CTkLabel(frame_retorno, text="Si volvés rápido sin equipaje, el juego te cobra una tasa. Anotala acá y se descuenta del profit final de esta carga.",
+                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left", wraplength=460).pack(anchor="w", padx=15, pady=(0, 10))
+        ctk.CTkLabel(frame_retorno, text="Costo del retorno rápido:", font=(self.F_BODY, 12, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(0, 2))
+        self.ent_impuesto_retorno = ctk.CTkEntry(frame_retorno, placeholder_text="0", fg_color="#0d111c", text_color=ACCENT_ICE, font=(self.F_MONO, 13, "bold"))
+        self.ent_impuesto_retorno.insert(0, "0")
+        self.ent_impuesto_retorno.pack(fill="x", padx=15, pady=(0, 15))
+        self.ent_impuesto_retorno.bind("<KeyRelease>", lambda e: self.calculate_metrics())
+        self.ent_impuesto_retorno.bind("<FocusOut>", lambda e: (self.formatear_numero_visual(self.ent_impuesto_retorno), self.calculate_metrics()))
+
+        # --- Comparador de Premium ---
+        frame_premium = ctk.CTkFrame(col_der, fg_color="#161a26", border_color=ACCENT_LIME, border_width=1, corner_radius=14)
+        frame_premium.pack(fill="x")
+        ctk.CTkLabel(frame_premium, text="Cuánto te ahorra el Premium", font=(self.F_DISPLAY, 15, "bold"), text_color=ACCENT_LIME).pack(anchor="w", padx=15, pady=(15, 6))
+        self.lbl_premium_ahorro = ctk.CTkLabel(frame_premium, text="", font=(self.F_MONO, 13, "bold"), text_color=ACCENT_LIME, justify="left", wraplength=460)
+        self.lbl_premium_ahorro.pack(anchor="w", padx=15, pady=(0, 15))
+
+        self.calculate_metrics()
+
+    def calcular_boton_panico(self):
+        inversion_actual = self.last_metrics.get("inversion", 0.0)
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT AVG(profit_final) FROM historial_cargas WHERE user_id = ? AND profit_final > 0", (self.current_user_id,))
+        row = c.fetchone()
+        conn.close()
+        profit_promedio = row[0] if row and row[0] else 0.0
+
+        if inversion_actual <= 0:
+            self.lbl_panico_resultado.configure(text="Todavía no metiste inversión en esta carga.")
+            return
+        if profit_promedio <= 0:
+            self.lbl_panico_resultado.configure(
+                text=(f"Si perdés esta carga, se van {int(inversion_actual):,} silver.\n"
+                      "Todavía no tenés suficientes cargas con ganancia en tu Historial para estimar cuánto tardarías en recuperarte.")
+            )
+            return
+
+        viajes_necesarios = inversion_actual / profit_promedio
+        self.lbl_panico_resultado.configure(
+            text=(f"Si te matan, perdés {int(inversion_actual):,} silver.\n"
+                  f"Con tu profit promedio ({int(profit_promedio):,} silver/viaje), necesitás como {viajes_necesarios:.1f} viajes buenos para recuperarte.")
+        )
+
+    # ------------------------------------------------------------------ #
+    # PÁGINA: REFINO
     # ------------------------------------------------------------------ #
     def build_tab_refino(self, parent):
-        ctk.CTkLabel(parent, text="Calculadora de Refinado", font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=5, anchor="w")
-        ctk.CTkLabel(parent, text="Ratio base: 5 materia prima → 1 refinado (T4+).\nEl bonus de ciudad/foco reduce cuánta materia prima\nse gasta realmente por unidad refinada.",
-                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left").pack(padx=5, pady=(0, 10), anchor="w")
+        ctk.CTkLabel(parent, text="Calculadora de Refinado", font=(self.F_DISPLAY, 18, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Ratio base: 5 materia prima por 1 refinado (T4 en adelante). El bonus de ciudad y de foco bajan cuánta materia prima gastás por unidad refinada.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 15), anchor="w")
 
-        frame_in = ctk.CTkFrame(parent, fg_color="#0d111c", corner_radius=10)
-        frame_in.pack(fill="x", padx=5, pady=5)
+        frame_in = ctk.CTkFrame(parent, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        frame_in.pack(fill="x", padx=10, pady=5)
 
-        ctk.CTkLabel(frame_in, text="Cantidad Refinado Deseado:", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(10, 2))
-        self.ent_refino_cantidad = ctk.CTkEntry(frame_in, placeholder_text="Ej: 100", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Cantidad Refinado Deseado:", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(15, 2))
+        self.ent_refino_cantidad = ctk.CTkEntry(frame_in, placeholder_text="Ej: 100", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_refino_cantidad.insert(0, "100")
-        self.ent_refino_cantidad.pack(fill="x", padx=10, pady=4)
+        self.ent_refino_cantidad.pack(anchor="w", padx=15, pady=4)
         self.ent_refino_cantidad.bind("<KeyRelease>", lambda e: self.calcular_refino())
 
-        ctk.CTkLabel(frame_in, text="Bonus de Ciudad (%):", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_refino_bonus_ciudad = ctk.CTkEntry(frame_in, placeholder_text="Ej: 44 (capital de ese recurso)", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Bonus de Ciudad (%):", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_refino_bonus_ciudad = ctk.CTkEntry(frame_in, placeholder_text="Ej: 44 (capital de ese recurso)", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_refino_bonus_ciudad.insert(0, "0")
-        self.ent_refino_bonus_ciudad.pack(fill="x", padx=10, pady=4)
+        self.ent_refino_bonus_ciudad.pack(anchor="w", padx=15, pady=4)
         self.ent_refino_bonus_ciudad.bind("<KeyRelease>", lambda e: self.calcular_refino())
 
-        ctk.CTkLabel(frame_in, text="Bonus de Foco/Especialización (%):", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_refino_bonus_foco = ctk.CTkEntry(frame_in, placeholder_text="Ej: 25 (foco 100% activo)", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Bonus de Foco/Especialización (%):", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_refino_bonus_foco = ctk.CTkEntry(frame_in, placeholder_text="Ej: 25 (foco 100% activo)", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_refino_bonus_foco.insert(0, "0")
-        self.ent_refino_bonus_foco.pack(fill="x", padx=10, pady=(4, 10))
+        self.ent_refino_bonus_foco.pack(anchor="w", padx=15, pady=(4, 15))
         self.ent_refino_bonus_foco.bind("<KeyRelease>", lambda e: self.calcular_refino())
 
-        self.lbl_refino_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 14, "bold"), text_color="#48c9dc", justify="left")
-        self.lbl_refino_resultado.pack(padx=5, pady=15, anchor="w")
+        self.lbl_refino_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 15, "bold"), text_color="#48c9dc", justify="left")
+        self.lbl_refino_resultado.pack(padx=10, pady=20, anchor="w")
 
         self.calcular_refino()
 
@@ -1921,8 +2051,6 @@ class AlbionCargoApp(ctk.CTk):
         bonus_foco = self.get_float(self.ent_refino_bonus_foco.get()) / 100
 
         ratio_base = 5.0
-        # El bonus de ciudad reduce el costo efectivo de materia prima; el foco
-        # además devuelve una parte de esa materia prima gastada.
         materia_por_unidad_ciudad = ratio_base * (1 - bonus_ciudad)
         materia_total_ciudad = cantidad * materia_por_unidad_ciudad
 
@@ -1938,41 +2066,127 @@ class AlbionCargoApp(ctk.CTk):
         )
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: SIMULADOR DE ROUNDTRIP (NPC -> Mercado Negro directo)
+    # PÁGINA: ENCANTAR (antes era una ventanita cortada, ahora es su
+    # propia página completa así se lee bien y nada se corta)
+    # ------------------------------------------------------------------ #
+    def build_tab_encantar(self, parent):
+        ctk.CTkLabel(parent, text="Requisitos de Encantado", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_GOLD).pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Cada nivel de encantamiento pide UNA esencia distinta, no las tres juntas: el .1 pide Runas, el .2 pide Almas, el .3 pide Reliquias. El número es el mismo para los tres niveles, solo cambia según el tipo de pieza.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=1000).pack(padx=10, pady=(0, 15), anchor="w")
+
+        cols = ctk.CTkFrame(parent, fg_color="transparent")
+        cols.pack(fill="x", padx=10)
+
+        for i, (nombre_cat, costo, color) in enumerate(ENCANTE_COSTOS):
+            card = ctk.CTkFrame(cols, fg_color="#161a26", border_color=color, border_width=1, corner_radius=14)
+            card.grid(row=0, column=i, padx=8, pady=5, sticky="nsew")
+            cols.grid_columnconfigure(i, weight=1)
+            strip = ctk.CTkFrame(card, fg_color=color, height=3, corner_radius=0)
+            strip.pack(fill="x", side="top")
+            ctk.CTkLabel(card, text=nombre_cat, font=(self.F_BODY, 13, "bold"), text_color="#eef1f8", wraplength=220, justify="left").pack(anchor="w", padx=14, pady=(12, 8))
+
+            for nivel, esencia in ((".1", "Runas"), (".2", "Almas"), (".3", "Reliquias")):
+                fila = ctk.CTkFrame(card, fg_color="transparent")
+                fila.pack(fill="x", padx=14, pady=2)
+                ctk.CTkLabel(fila, text=f"Nivel {nivel} pide {esencia}:", font=(self.F_BODY, 12), text_color="#c7cede").pack(side="left")
+                ctk.CTkLabel(fila, text=f"{costo:,}", font=(self.F_MONO, 13, "bold"), text_color=color).pack(side="right")
+            ctk.CTkFrame(card, fg_color="transparent", height=10).pack()
+
+        frame_calc = ctk.CTkFrame(parent, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        frame_calc.pack(fill="x", padx=10, pady=(20, 5))
+        ctk.CTkLabel(frame_calc, text="Calculadora Rápida", font=(self.F_DISPLAY, 15, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(15, 8))
+
+        fila_calc = ctk.CTkFrame(frame_calc, fg_color="transparent")
+        fila_calc.pack(fill="x", padx=15, pady=(0, 15))
+
+        col1 = ctk.CTkFrame(fila_calc, fg_color="transparent")
+        col1.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkLabel(col1, text="Tipo de Equipo:", font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(anchor="w", pady=(0, 4))
+        self.sel_encante_cat = ctk.CTkOptionMenu(
+            col1, values=[c[0] for c in ENCANTE_COSTOS], command=lambda v: self.calcular_encantado(),
+            fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
+            dropdown_fg_color="#12151f", dropdown_hover_color=ACCENT_GOLD, dropdown_text_color="#eef1f8",
+            font=(self.F_BODY, 12, "bold"))
+        self.sel_encante_cat.pack(fill="x")
+
+        col2 = ctk.CTkFrame(fila_calc, fg_color="transparent")
+        col2.pack(side="left", fill="x", expand=True, padx=10)
+        ctk.CTkLabel(col2, text="¿Hasta qué nivel?", font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(anchor="w", pady=(0, 4))
+        self.sel_encante_nivel = ctk.CTkOptionMenu(
+            col2, values=[".1 (solo Runas)", ".2 (Runas + Almas)", ".3 (Runas + Almas + Reliquias)"],
+            command=lambda v: self.calcular_encantado(),
+            fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
+            dropdown_fg_color="#12151f", dropdown_hover_color=ACCENT_GOLD, dropdown_text_color="#eef1f8",
+            font=(self.F_BODY, 12, "bold"))
+        self.sel_encante_nivel.set(".3 (Runas + Almas + Reliquias)")
+        self.sel_encante_nivel.pack(fill="x")
+
+        col3 = ctk.CTkFrame(fila_calc, fg_color="transparent")
+        col3.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        ctk.CTkLabel(col3, text="Cantidad de Piezas:", font=(self.F_BODY, 13, "bold"), text_color="#97a2bd").pack(anchor="w", pady=(0, 4))
+        self.ent_encante_piezas = ctk.CTkEntry(col3, fg_color="#0d111c", text_color="#eef1f8")
+        self.ent_encante_piezas.insert(0, "1")
+        self.ent_encante_piezas.pack(fill="x")
+        self.ent_encante_piezas.bind("<KeyRelease>", lambda e: self.calcular_encantado())
+
+        self.lbl_encante_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 14, "bold"), text_color=ACCENT_GOLD, justify="left")
+        self.lbl_encante_resultado.pack(padx=10, pady=20, anchor="w")
+
+        self.calcular_encantado()
+
+    def calcular_encantado(self):
+        cat = self.sel_encante_cat.get()
+        costo_base = next((costo for nombre, costo, color in ENCANTE_COSTOS if nombre == cat), 0)
+        piezas = max(int(self.get_float(self.ent_encante_piezas.get())), 0)
+        nivel_txt = self.sel_encante_nivel.get()
+        total_por_esencia = costo_base * piezas
+
+        lineas = [f"Para {piezas} pieza(s) de '{cat}':"]
+        if nivel_txt.startswith(".1") or nivel_txt.startswith(".2") or nivel_txt.startswith(".3"):
+            lineas.append(f"Runas necesarias (nivel .1): {total_por_esencia:,}")
+        if nivel_txt.startswith(".2") or nivel_txt.startswith(".3"):
+            lineas.append(f"Almas necesarias (nivel .2): {total_por_esencia:,}")
+        if nivel_txt.startswith(".3"):
+            lineas.append(f"Reliquias necesarias (nivel .3): {total_por_esencia:,}")
+
+        self.lbl_encante_resultado.configure(text="\n".join(lineas))
+
+    # ------------------------------------------------------------------ #
+    # PÁGINA: ROUNDTRIP
     # ------------------------------------------------------------------ #
     def build_tab_roundtrip(self, parent):
-        ctk.CTkLabel(parent, text="Simulador de Roundtrip", font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=5, anchor="w")
-        ctk.CTkLabel(parent, text="Comprar directo al NPC vendor (sin esperar\nOrden de Compra) y vender directo en el\nMercado Negro. Sin fee de setup del 2.5%.",
-                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left").pack(padx=5, pady=(0, 10), anchor="w")
+        ctk.CTkLabel(parent, text="Simulador de Roundtrip", font=(self.F_DISPLAY, 18, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Comprar directo al vendedor NPC (sin esperar Orden de Compra) y vender directo en el Mercado Negro. Sin el 2.5% de fee de setup.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 15), anchor="w")
 
-        frame_in = ctk.CTkFrame(parent, fg_color="#0d111c", corner_radius=10)
-        frame_in.pack(fill="x", padx=5, pady=5)
+        frame_in = ctk.CTkFrame(parent, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        frame_in.pack(fill="x", padx=10, pady=5)
 
-        ctk.CTkLabel(frame_in, text="Precio Compra NPC (por unidad):", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(10, 2))
-        self.ent_rt_compra = ctk.CTkEntry(frame_in, placeholder_text="0", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Precio Compra NPC (por unidad):", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(15, 2))
+        self.ent_rt_compra = ctk.CTkEntry(frame_in, placeholder_text="0", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_rt_compra.insert(0, "0")
-        self.ent_rt_compra.pack(fill="x", padx=10, pady=4)
+        self.ent_rt_compra.pack(anchor="w", padx=15, pady=4)
         self.ent_rt_compra.bind("<KeyRelease>", lambda e: self.calcular_roundtrip())
 
-        ctk.CTkLabel(frame_in, text="Precio Venta Mercado Negro (por unidad):", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_rt_venta = ctk.CTkEntry(frame_in, placeholder_text="0", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Precio Venta Mercado Negro (por unidad):", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_rt_venta = ctk.CTkEntry(frame_in, placeholder_text="0", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_rt_venta.insert(0, "0")
-        self.ent_rt_venta.pack(fill="x", padx=10, pady=4)
+        self.ent_rt_venta.pack(anchor="w", padx=15, pady=4)
         self.ent_rt_venta.bind("<KeyRelease>", lambda e: self.calcular_roundtrip())
 
-        ctk.CTkLabel(frame_in, text="Cantidad de Unidades:", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_rt_cantidad = ctk.CTkEntry(frame_in, placeholder_text="1", fg_color="#161a26", text_color="#eef1f8")
+        ctk.CTkLabel(frame_in, text="Cantidad de Unidades:", font=(self.F_BODY, 14, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_rt_cantidad = ctk.CTkEntry(frame_in, placeholder_text="1", fg_color="#0d111c", text_color="#eef1f8", width=300)
         self.ent_rt_cantidad.insert(0, "1")
-        self.ent_rt_cantidad.pack(fill="x", padx=10, pady=(4, 10))
+        self.ent_rt_cantidad.pack(anchor="w", padx=15, pady=(4, 10))
         self.ent_rt_cantidad.bind("<KeyRelease>", lambda e: self.calcular_roundtrip())
 
-        self.switch_rt_premium = ctk.CTkSwitch(parent, text="Usar Premium en este cálculo (4% en vez de 8%)",
+        self.switch_rt_premium = ctk.CTkSwitch(frame_in, text="Usar Premium en este cálculo (4% en vez de 8%)",
                                                 font=(self.F_BODY, 12, "bold"), progress_color="#3ddc84",
                                                 command=self.calcular_roundtrip)
-        self.switch_rt_premium.pack(padx=5, pady=(5, 10), anchor="w")
+        self.switch_rt_premium.pack(padx=15, pady=(0, 15), anchor="w")
 
-        self.lbl_rt_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 14, "bold"), text_color="#3ddc84", justify="left")
-        self.lbl_rt_resultado.pack(padx=5, pady=10, anchor="w")
+        self.lbl_rt_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 15, "bold"), text_color="#3ddc84", justify="left")
+        self.lbl_rt_resultado.pack(padx=10, pady=20, anchor="w")
 
         self.calcular_roundtrip()
 
@@ -1983,7 +2197,7 @@ class AlbionCargoApp(ctk.CTk):
         tax_rate = 0.04 if self.switch_rt_premium.get() else 0.08
         ajuste_rate = 0.025
 
-        inversion_total = compra * cantidad  # Sin fee de setup: es compra directa al NPC, no Orden de Compra
+        inversion_total = compra * cantidad
         venta_bruta = venta * cantidad
         impuesto = venta_bruta * tax_rate
         ajuste = venta_bruta * ajuste_rate
@@ -1993,56 +2207,218 @@ class AlbionCargoApp(ctk.CTk):
         color = "#3ddc84" if profit >= 0 else "#ef5350"
         self.lbl_rt_resultado.configure(
             text=(f"Inversión total (NPC): {int(inversion_total):,} silver\n"
-                  f"Venta neta (M. Negro): {int(venta_neta):,} silver\n"
+                  f"Venta neta (Mercado Negro): {int(venta_neta):,} silver\n"
                   f"Profit Roundtrip: {int(profit):,} silver"),
             text_color=color
         )
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: HISTORIAL DE CARGAS CON "GRÁFICO" DE RENTABILIDAD
+    # PÁGINA: MATERIALES (lee las esencias DIRECTO de la base de datos,
+    # así funciona sin importar si la página Runas y Notas está abierta)
+    # ------------------------------------------------------------------ #
+    def build_tab_materiales(self, parent):
+        ctk.CTkLabel(parent, text="Costo de tus Materiales Guardados", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_PURPLE).pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text=f"Ponés cuánto vale cada Runa/Alma/Reliquia ahora mismo, y te digo cuánto silver tenés parado sin vender (según lo que anotaste para {self.current_hub}).",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 15), anchor="w")
+
+        frame_precios = ctk.CTkFrame(parent, fg_color="#161a26", border_color="#2a3142", border_width=1, corner_radius=14)
+        frame_precios.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(frame_precios, text="Precio de 1 Runa:", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(15, 2))
+        self.ent_precio_runa = ctk.CTkEntry(frame_precios, placeholder_text="0", fg_color="#0d111c", text_color="#eef1f8", width=300)
+        self.ent_precio_runa.insert(0, "0")
+        self.ent_precio_runa.pack(anchor="w", padx=15, pady=4)
+        self.ent_precio_runa.bind("<KeyRelease>", lambda e: self.calcular_costo_materiales())
+
+        ctk.CTkLabel(frame_precios, text="Precio de 1 Alma:", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_precio_alma = ctk.CTkEntry(frame_precios, placeholder_text="0", fg_color="#0d111c", text_color="#eef1f8", width=300)
+        self.ent_precio_alma.insert(0, "0")
+        self.ent_precio_alma.pack(anchor="w", padx=15, pady=4)
+        self.ent_precio_alma.bind("<KeyRelease>", lambda e: self.calcular_costo_materiales())
+
+        ctk.CTkLabel(frame_precios, text="Precio de 1 Reliquia:", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=15, pady=(8, 2))
+        self.ent_precio_reliquia = ctk.CTkEntry(frame_precios, placeholder_text="0", fg_color="#0d111c", text_color="#eef1f8", width=300)
+        self.ent_precio_reliquia.insert(0, "0")
+        self.ent_precio_reliquia.pack(anchor="w", padx=15, pady=(4, 15))
+        self.ent_precio_reliquia.bind("<KeyRelease>", lambda e: self.calcular_costo_materiales())
+
+        btn_calc_mat = ctk.CTkButton(parent, text="Calcular con lo que tengo ahora", fg_color=ACCENT_PURPLE, text_color="#12141c",
+                                      font=(self.F_BODY, 13, "bold"), command=self.calcular_costo_materiales)
+        btn_calc_mat.pack(padx=10, pady=(15, 5), anchor="w")
+
+        self.lbl_costo_materiales = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 14, "bold"), text_color=ACCENT_PURPLE, justify="left")
+        self.lbl_costo_materiales.pack(padx=10, pady=15, anchor="w")
+
+        self.calcular_costo_materiales()
+
+    def calcular_costo_materiales(self):
+        # Idea: lee las esencias directo de la base de datos en vez de los
+        # campos en pantalla, así funciona esté abierta o no la página
+        # "Runas y Notas" (que ahora es una página aparte y puede no estar
+        # construida en este momento).
+        precio_runa = self.get_float(self.ent_precio_runa.get())
+        precio_alma = self.get_float(self.ent_precio_alma.get())
+        precio_reliquia = self.get_float(self.ent_precio_reliquia.get())
+
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT runas, almas, reliquias FROM esencias WHERE user_id = ? AND hub = ?", (self.current_user_id, self.current_hub))
+        filas = c.fetchall()
+        conn.close()
+
+        total_runas = sum(f[0] for f in filas)
+        total_almas = sum(f[1] for f in filas)
+        total_reliquias = sum(f[2] for f in filas)
+
+        valor_runas = total_runas * precio_runa
+        valor_almas = total_almas * precio_alma
+        valor_reliquias = total_reliquias * precio_reliquia
+        total = valor_runas + valor_almas + valor_reliquias
+
+        self.lbl_costo_materiales.configure(
+            text=(f"Tenés {total_runas} Runas ({int(valor_runas):,} silver)\n"
+                  f"Tenés {total_almas} Almas ({int(valor_almas):,} silver)\n"
+                  f"Tenés {total_reliquias} Reliquias ({int(valor_reliquias):,} silver)\n"
+                  f"Total parado en el banco: {int(total):,} silver")
+        )
+
+    # ------------------------------------------------------------------ #
+    # PÁGINA: HISTORIAL
     # ------------------------------------------------------------------ #
     def build_tab_historial(self, parent):
-        ctk.CTkLabel(parent, text="Historial de Cargas Archivadas", font=(self.F_DISPLAY, 14, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=5, anchor="w")
-        ctk.CTkLabel(parent, text="Usá el botón '📌 Archivar al Historial' arriba\nde la tabla para guardar una foto de esta\ncarga y compararla con las anteriores.",
-                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left").pack(padx=5, pady=(0, 10), anchor="w")
+        ctk.CTkLabel(parent, text="Historial de Cargas Archivadas", font=(self.F_DISPLAY, 18, "bold"), text_color="#e3a53c").pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Usá el botón 'Archivar al Historial' en Mi Carga para guardar una foto de esta carga y compararla con las anteriores.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 10), anchor="w")
 
-        # Resumen rápido de la semana/mes actual (idea nueva).
-        self.lbl_resumen_periodo = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 12, "bold"), text_color=ACCENT_ICE, justify="left")
-        self.lbl_resumen_periodo.pack(padx=5, pady=(0, 8), anchor="w")
+        self.lbl_resumen_periodo = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 13, "bold"), text_color=ACCENT_ICE, justify="left")
+        self.lbl_resumen_periodo.pack(padx=10, pady=(0, 10), anchor="w")
 
         botones_hist = ctk.CTkFrame(parent, fg_color="transparent")
-        botones_hist.pack(fill="x", padx=5, pady=(0, 8))
-        btn_ranking = ctk.CTkButton(botones_hist, text="🏆 Ranking Ítems", width=140, fg_color=ACCENT_GOLD, text_color="#12141c",
+        botones_hist.pack(fill="x", padx=10, pady=(0, 10))
+        btn_ranking = ctk.CTkButton(botones_hist, text="Ranking de Ítems", width=160, fg_color=ACCENT_GOLD, text_color="#12141c",
                                      font=(self.F_BODY, 12, "bold"), command=self.mostrar_ranking_items)
-        btn_ranking.pack(side="left", padx=(0, 5))
-        btn_exp_hist = ctk.CTkButton(botones_hist, text="📊 CSV Historial", width=140, fg_color="#97a2bd", text_color="#12141c",
+        btn_ranking.pack(side="left", padx=(0, 8))
+        btn_fama = ctk.CTkButton(botones_hist, text="Salón de la Fama", width=160, fg_color=ACCENT_PINK, text_color="#12141c",
+                                  font=(self.F_BODY, 12, "bold"), command=self.mostrar_salon_de_la_fama)
+        btn_fama.pack(side="left", padx=8)
+        btn_exp_hist = ctk.CTkButton(botones_hist, text="CSV del Historial", width=160, fg_color="#97a2bd", text_color="#12141c",
                                       font=(self.F_BODY, 12, "bold"), command=self.exportar_historial_csv)
-        btn_exp_hist.pack(side="left", padx=5)
+        btn_exp_hist.pack(side="left", padx=8)
 
-        self.historial_scroll = ctk.CTkScrollableFrame(parent, fg_color="#0d111c", corner_radius=10, height=340)
-        self.historial_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        self.grafico_crecimiento_canvas = tk.Canvas(parent, height=110, bg="#0d111c", highlightthickness=0, bd=0)
+        self.grafico_crecimiento_canvas.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.historial_scroll = ctk.CTkScrollableFrame(parent, fg_color="#0d111c", corner_radius=10)
+        self.historial_scroll.pack(fill="both", expand=True, padx=10, pady=5)
         self.bind_mousewheel_recursive(self.historial_scroll, self.historial_scroll, orient="y")
 
+    def dibujar_grafico_crecimiento(self, registros):
+        canvas = getattr(self, "grafico_crecimiento_canvas", None)
+        if canvas is None or not canvas.winfo_exists():
+            return
+        canvas.delete("all")
+        if not registros:
+            canvas.create_text(10, 55, anchor="w", fill="#97a2bd", font=(self.F_BODY, 12),
+                                text="Archivá cargas para ver tu curva de crecimiento acá.")
+            return
+
+        cronologico = list(reversed(registros))
+        acumulado = []
+        total = 0.0
+        for hub, destino, fecha, inversion, venta_neta, profit in cronologico:
+            total += profit
+            acumulado.append(total)
+
+        canvas.update_idletasks()
+        w = canvas.winfo_width() or 1000
+        h = 110
+        margen = 15
+        minimo = min(acumulado + [0])
+        maximo = max(acumulado + [0])
+        rango = (maximo - minimo) or 1
+
+        n = len(acumulado)
+        paso_x = (w - 2 * margen) / max(n - 1, 1)
+
+        def y_de(valor):
+            return h - margen - ((valor - minimo) / rango) * (h - 2 * margen)
+
+        puntos = []
+        for i, val in enumerate(acumulado):
+            x = margen + i * paso_x
+            y = y_de(val)
+            puntos.append((x, y))
+
+        color_linea = "#3ddc84" if acumulado[-1] >= 0 else "#ef5350"
+        if len(puntos) > 1:
+            flat = [coord for punto in puntos for coord in punto]
+            canvas.create_line(*flat, fill=color_linea, width=2, smooth=True)
+        for x, y in puntos:
+            canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill=color_linea, outline="")
+
+        canvas.create_text(w - margen, 15, anchor="ne", fill=color_linea, font=(self.F_MONO, 12, "bold"),
+                            text=f"{int(acumulado[-1]):,} silver acumulado")
+
+    def mostrar_salon_de_la_fama(self):
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''
+            SELECT nombre, SUM(profit_total) as total, AVG(profit_unidad) as promedio, SUM(cantidad) as unidades
+            FROM banco_items WHERE user_id = ? AND estado != '✕ Cancelado'
+            GROUP BY nombre HAVING SUM(cantidad) > 0
+        ''', (self.current_user_id,))
+        filas = c.fetchall()
+        conn.close()
+
+        if not filas:
+            self.dialogo_info("Todavía sin Fama", "Necesitás archivar o exportar al menos una carga con ítems para que esto se llene.")
+            return
+
+        top_total = sorted(filas, key=lambda f: f[1], reverse=True)[:3]
+        top_margen = sorted(filas, key=lambda f: f[2], reverse=True)[:3]
+
+        win, borde = self._ventana_emergente("Salón de la Fama", ACCENT_PINK)
+        win.geometry("500x520")
+        ctk.CTkLabel(borde, text="Tus Ítems Estrella", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_PINK).pack(pady=(18, 10), padx=20, anchor="w")
+
+        scroll = ctk.CTkScrollableFrame(borde, fg_color="#0d111c", corner_radius=10)
+        scroll.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        self.bind_mousewheel_recursive(scroll, scroll, orient="y")
+
+        ctk.CTkLabel(scroll, text="Top 3 por Profit Total", font=(self.F_BODY, 14, "bold"), text_color=ACCENT_GOLD).pack(anchor="w", padx=8, pady=(8, 4))
+        for i, (nombre, total, promedio, unidades) in enumerate(top_total, start=1):
+            ctk.CTkLabel(scroll, text=f"{i}. {nombre} — {int(total):,} silver total ({int(unidades)} unidades)",
+                         font=(self.F_MONO, 12, "bold"), text_color="#eef1f8", anchor="w").pack(fill="x", padx=8, pady=2)
+
+        ctk.CTkFrame(scroll, fg_color="#232a3c", height=1).pack(fill="x", padx=8, pady=10)
+
+        ctk.CTkLabel(scroll, text="Top 3 por Mejor Margen Promedio", font=(self.F_BODY, 14, "bold"), text_color=ACCENT_ICE).pack(anchor="w", padx=8, pady=(0, 4))
+        for i, (nombre, total, promedio, unidades) in enumerate(top_margen, start=1):
+            ctk.CTkLabel(scroll, text=f"{i}. {nombre} — {int(promedio):,} silver/unidad en promedio",
+                         font=(self.F_MONO, 12, "bold"), text_color="#eef1f8", anchor="w").pack(fill="x", padx=8, pady=2)
+
+        ctk.CTkButton(borde, text="Cerrar", fg_color=ACCENT_PINK, text_color="#12141c",
+                      font=(self.F_BODY, 13, "bold"), width=140, command=win.destroy).pack(pady=(0, 16))
+        self._centrar_ventana(win, 500, 520)
+        win.grab_set()
+
     def _guardar_snapshot_banco(self, cursor):
-        """
-        Guarda una copia de CADA ítem de la carga actual (incluidos los
-        cancelados, con profit en 0) en el "Banco" -- el registro permanente
-        que sobrevive aunque la tabla activa se vacíe al exportar CSV/PDF.
-        De acá salen "Todos los Pedidos", "Compras con Profit" y el ranking
-        de Favoritos.
-        """
         tax_rate = self.last_metrics.get("tax_rate", 0.08)
         ajuste_rate = 0.025
         setup_rate = 0.025
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
-        for row in self.row_inputs:
-            estado = row["status"].get()
-            nombre = row["nombre"].get().strip() or "(sin nombre)"
-            tier = row["tier"].get()
-            valor_oc = self.get_float(row["valor_oc"].get())
-            precio_mn = self.get_float(row["precio_mn"].get())
-            cantidad = int(self.get_float(row["cantidad"].get())) or 1
-            favorito = 1 if row["favorito"]["on"] else 0
+
+        conn2 = sqlite3.connect(DB_NAME)
+        c2 = conn2.cursor()
+        c2.execute("SELECT status, nombre, cantidad, tier, valor_oc, precio_mn, favorito FROM inventario WHERE user_id=? AND hub=? AND carga_nombre=?",
+                   (self.current_user_id, self.current_hub, self.current_carga))
+        items = c2.fetchall()
+        conn2.close()
+
+        for status, nombre, cantidad, tier, valor_oc, precio_mn, favorito in items:
+            estado = "✕ Cancelado" if status == "canceled" else ("⚙ En Proceso" if status == "processing" else "✓ Recibido")
+            nombre = (nombre or "").strip() or "(sin nombre)"
+            cantidad = int(cantidad) or 1
 
             if estado == "✕ Cancelado":
                 profit_unidad = 0.0
@@ -2060,28 +2436,27 @@ class AlbionCargoApp(ctk.CTk):
                   valor_oc, precio_mn, profit_unidad, profit_total, favorito, fecha))
 
     def vaciar_carga_actual(self):
-        """
-        Borra todos los ítems de la carga activa (tabla + base de datos),
-        pero NO toca esencias, notas, ni configuración del hub. Se usa
-        después de mandar todo al Banco al exportar CSV/PDF (idea nueva #3).
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute("DELETE FROM inventario WHERE user_id = ? AND hub = ? AND carga_nombre = ?",
                   (self.current_user_id, self.current_hub, self.current_carga))
         conn.commit()
         conn.close()
-        for row in self.row_inputs:
-            row["frame"].destroy()
-        self.row_inputs.clear()
-        self.actualizar_contador_estados()
+        if self.pagina_actual == "📦 Mi Carga":
+            self.cargar_items_tabla()
         self.calculate_metrics()
 
     def archivar_carga(self):
-        if not self.row_inputs:
-            messagebox.showwarning("Nada que archivar", "No hay ítems cargados para archivar.")
+        conn0 = sqlite3.connect(DB_NAME)
+        c0 = conn0.cursor()
+        c0.execute("SELECT COUNT(*) FROM inventario WHERE user_id=? AND hub=? AND carga_nombre=?",
+                   (self.current_user_id, self.current_hub, self.current_carga))
+        hay_items = c0.fetchone()[0] > 0
+        conn0.close()
+        if not hay_items:
+            self.dialogo_warning("Nada que archivar", "No hay ítems cargados para archivar.")
             return
-        self.sync_and_calc()
+        self.calculate_metrics()
         m = self.last_metrics
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -2093,11 +2468,12 @@ class AlbionCargoApp(ctk.CTk):
         self._guardar_snapshot_banco(cursor)
         conn.commit()
         conn.close()
-        messagebox.showinfo("Carga Archivada", "Se guardó una foto de esta carga en el Historial y en el Banco.")
-        self.refresh_historial_tab()
-        if hasattr(self, "refrescar_banco_tab"):
+        self.dialogo_info("Carga Archivada", "Se guardó una foto de esta carga en el Historial y en el Banco.")
+        if self.pagina_actual == "📊 Historial":
+            self.refresh_historial_tab()
+        if self.pagina_actual == "🏦 Banco":
             self.refrescar_banco_tab()
-        if hasattr(self, "refrescar_favoritos_tab"):
+        if self.pagina_actual == "★ Favoritos":
             self.refrescar_favoritos_tab()
 
     def refresh_historial_tab(self):
@@ -2115,8 +2491,8 @@ class AlbionCargoApp(ctk.CTk):
         registros = cursor.fetchall()
         conn.close()
 
-        # Resumen semanal/mensual (idea nueva): suma el profit_final de todas
-        # las cargas archivadas cuya fecha caiga en la semana o el mes actual.
+        self.dibujar_grafico_crecimiento(registros)
+
         if hasattr(self, "lbl_resumen_periodo"):
             ahora = datetime.now()
             inicio_semana = ahora - timedelta(days=ahora.weekday())
@@ -2135,16 +2511,14 @@ class AlbionCargoApp(ctk.CTk):
                     profit_mes += profit
                     cargas_mes += 1
             self.lbl_resumen_periodo.configure(
-                text=(f"📅 Esta semana: {int(profit_semana):,} silver ({cargas_semana} cargas)   |   "
-                      f"📆 Este mes: {int(profit_mes):,} silver ({cargas_mes} cargas)")
+                text=(f"Esta semana: {int(profit_semana):,} silver ({cargas_semana} cargas)   |   "
+                      f"Este mes: {int(profit_mes):,} silver ({cargas_mes} cargas)")
             )
 
         if not registros:
-            ctk.CTkLabel(self.historial_scroll, text="(Sin cargas archivadas todavía)", font=(self.F_BODY, 12), text_color="#97a2bd").pack(pady=10)
+            ctk.CTkLabel(self.historial_scroll, text="Todavía no archivaste ninguna carga.", font=(self.F_BODY, 13), text_color="#97a2bd").pack(pady=10)
             return
 
-        # "Gráfico" simple con barras de texto: cada carga es una fila con una
-        # barra proporcional al profit (verde si es positivo, roja si es negativo).
         max_abs_profit = max(abs(r[5]) for r in registros) or 1
 
         for hub, destino, fecha, inversion, venta_neta, profit in registros:
@@ -2152,10 +2526,10 @@ class AlbionCargoApp(ctk.CTk):
             item_frame.pack(fill="x", pady=4, padx=2)
 
             top_line = ctk.CTkLabel(item_frame, text=f"{fecha}  •  {hub} → {destino.split('(')[0].strip()}",
-                                     font=(self.F_BODY, 12, "bold"), text_color="#eef1f8", anchor="w")
+                                     font=(self.F_BODY, 13, "bold"), text_color="#eef1f8", anchor="w")
             top_line.pack(fill="x", padx=10, pady=(8, 0))
 
-            barra_len = int((abs(profit) / max_abs_profit) * 20)
+            barra_len = int((abs(profit) / max_abs_profit) * 30)
             barra = "█" * max(barra_len, 1)
             color_barra = "#3ddc84" if profit >= 0 else "#ef5350"
             bar_line = ctk.CTkLabel(item_frame, text=f"{barra}  {int(profit):,} silver",
@@ -2163,40 +2537,79 @@ class AlbionCargoApp(ctk.CTk):
             bar_line.pack(fill="x", padx=10, pady=(2, 8))
             self.bind_mousewheel_recursive(item_frame, self.historial_scroll, orient="y")
 
-    # ------------------------------------------------------------------ #
-    # IDEA NUEVA: RANKING DE ÍTEMS MÁS RENTABLES (histórico)
-    # ------------------------------------------------------------------ #
+    UMBRAL_AUTO_FAVORITO = 4
+
     def mostrar_ranking_items(self):
-        """
-        Agrupa todos los snapshots de historial_items por nombre de ítem y
-        muestra los 10 más rentables en promedio por unidad, junto con
-        cuántas veces aparecieron y el profit total acumulado. Te dice en
-        qué ítems conviene enfocarte a futuro, en vez de adivinar.
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute('''
-            SELECT nombre, AVG(profit_unidad) as promedio, SUM(profit_unidad * cantidad) as total, COUNT(*) as veces
-            FROM historial_items WHERE user_id = ?
-            GROUP BY nombre ORDER BY promedio DESC LIMIT 10
+            SELECT nombre, SUM(cantidad) as total_cant, COUNT(*) as veces,
+                   SUM(profit_total) as profit_total, AVG(profit_unidad) as profit_prom, MAX(favorito) as ya_fav
+            FROM banco_items WHERE user_id = ?
+            GROUP BY nombre ORDER BY total_cant DESC LIMIT 15
         ''', (self.current_user_id,))
         filas = c.fetchall()
+
+        recien_favoritos = []
+        for nombre, total_cant, veces, profit_total, profit_prom, ya_fav in filas:
+            if veces >= self.UMBRAL_AUTO_FAVORITO and not ya_fav:
+                c.execute("UPDATE banco_items SET favorito = 1 WHERE user_id = ? AND nombre = ?",
+                          (self.current_user_id, nombre))
+                recien_favoritos.append(nombre)
+        conn.commit()
         conn.close()
 
         if not filas:
-            messagebox.showinfo("Sin Datos", "Todavía no archivaste ninguna carga con ítems para poder rankear.")
+            self.dialogo_info("Sin Datos Todavía", "Todavía no exportaste ni archivaste ninguna carga. Cuando exportes un CSV o PDF, esto se llena solo.")
             return
 
-        lineas = []
-        for i, (nombre, promedio, total, veces) in enumerate(filas, start=1):
-            lineas.append(f"{i}. {nombre} — {int(promedio):,} silver/unidad prom. (x{veces}, total {int(total):,} silver)")
-        messagebox.showinfo("🏆 Ranking de Ítems Más Rentables", "\n".join(lineas))
+        win, borde = self._ventana_emergente("Ítems Más Comprados", ACCENT_GOLD)
+        win.geometry("540x580")
+        ctk.CTkLabel(borde, text="Lo que más compraste", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_GOLD).pack(pady=(18, 2), padx=20, anchor="w")
+        ctk.CTkLabel(borde, text="Ordenado por cuánto compraste de cada uno, con lo que te dejó de ganancia.",
+                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left").pack(padx=20, pady=(0, 12), anchor="w")
+
+        scroll = ctk.CTkScrollableFrame(borde, fg_color="#0d111c", corner_radius=10)
+        scroll.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        self.bind_mousewheel_recursive(scroll, scroll, orient="y")
+
+        for nombre, total_cant, veces, profit_total, profit_prom, ya_fav in filas:
+            es_fav = bool(ya_fav) or nombre in recien_favoritos
+            if profit_prom >= 500:
+                tag, color_tag = "Muy rentable", "#3ddc84"
+            elif profit_prom >= 0:
+                tag, color_tag = "Rentable", ACCENT_ICE
+            elif profit_prom >= -200:
+                tag, color_tag = "Al filo", "#e3a53c"
+            else:
+                tag, color_tag = "Te está costando plata", "#ef5350"
+
+            card = ctk.CTkFrame(scroll, fg_color="#1c2130", corner_radius=10)
+            card.pack(fill="x", pady=4, padx=4)
+            titulo = f"{'★ ' if es_fav else ''}{nombre}"
+            ctk.CTkLabel(card, text=titulo, font=(self.F_DISPLAY, 14, "bold"), text_color="#eef1f8" if not es_fav else ACCENT_GOLD).pack(anchor="w", padx=12, pady=(10, 2))
+            ctk.CTkLabel(card, text=f"Lo compraste {veces} veces ({int(total_cant):,} unidades en total)",
+                         font=(self.F_BODY, 12), text_color="#97a2bd").pack(anchor="w", padx=12)
+            ctk.CTkLabel(card, text=f"Profit total: {int(profit_total):,} silver   ·   Promedio por unidad: {int(profit_prom):,} silver",
+                         font=(self.F_MONO, 12, "bold"), text_color=color_tag).pack(anchor="w", padx=12, pady=(2, 2))
+            fila_tag = ctk.CTkFrame(card, fg_color=color_tag, corner_radius=8)
+            fila_tag.pack(anchor="w", padx=12, pady=(2, 10))
+            ctk.CTkLabel(fila_tag, text=f" {tag} ", font=(self.F_BODY, 11, "bold"), text_color="#12141c").pack(padx=2, pady=2)
+            self.bind_mousewheel_recursive(card, scroll, orient="y")
+
+        if recien_favoritos:
+            aviso = ctk.CTkLabel(borde, text=f"Se marcaron {len(recien_favoritos)} ítem(s) nuevo(s) como favorito automáticamente.",
+                                  font=(self.F_BODY, 12, "bold"), text_color=ACCENT_GOLD)
+            aviso.pack(padx=20, pady=(0, 10))
+
+        ctk.CTkButton(borde, text="Cerrar", fg_color=ACCENT_GOLD, text_color="#12141c",
+                      font=(self.F_BODY, 13, "bold"), width=140, command=win.destroy).pack(pady=(0, 16))
+        self._centrar_ventana(win, 540, 580)
+        win.grab_set()
+        if self.pagina_actual == "★ Favoritos":
+            self.refrescar_favoritos_tab()
 
     def exportar_historial_csv(self):
-        """
-        Saca TODO el historial de cargas archivadas (no solo la carga
-        actual) a un CSV, para analizarlo en Excel/Sheets si querés.
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute('''
@@ -2207,7 +2620,7 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
 
         if not filas:
-            messagebox.showwarning("Sin Datos", "No hay cargas archivadas todavía para exportar.")
+            self.dialogo_warning("Sin Datos", "No hay cargas archivadas todavía para exportar.")
             return
 
         filename = filedialog.asksaveasfilename(
@@ -2224,19 +2637,136 @@ class AlbionCargoApp(ctk.CTk):
                 writer.writerow(["Fecha", "Hub", "Destino", "Inversion", "Venta Neta", "Profit Final"])
                 for fecha, hub, destino, inversion, venta_neta, profit_final in filas:
                     writer.writerow([fecha, hub, destino, int(inversion), int(venta_neta), int(profit_final)])
-            messagebox.showinfo("Historial Exportado", f"Archivo guardado exitosamente en:\n{filename}")
+            self.dialogo_info("Historial Exportado", f"Archivo guardado exitosamente en:\n{filename}")
         except Exception as ex:
-            messagebox.showerror("Error CSV", f"No se pudo exportar el historial:\n{ex}")
+            self.dialogo_error("Error CSV", f"No se pudo exportar el historial:\n{ex}")
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: COMPARAR CUENTAS (multi-personaje)
+    # PÁGINA: BANCO
+    # ------------------------------------------------------------------ #
+    def build_tab_banco(self, parent):
+        ctk.CTkLabel(parent, text="El Banco", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_GOLD).pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Acá queda guardado todo lo que compraste, aunque exportes el CSV o el PDF y la tabla de Mi Carga se vacíe.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 10), anchor="w")
+
+        btn_refrescar_banco = ctk.CTkButton(parent, text="Refrescar", width=110, fg_color="#1e2536", hover_color=ACCENT_GOLD,
+                                             text_color="#eef1f8", font=(self.F_BODY, 12, "bold"), command=self.refrescar_banco_tab)
+        btn_refrescar_banco.pack(anchor="w", padx=10, pady=(0, 10))
+
+        cols = ctk.CTkFrame(parent, fg_color="transparent")
+        cols.pack(fill="both", expand=True, padx=10)
+
+        col_izq = ctk.CTkFrame(cols, fg_color="transparent")
+        col_izq.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        col_der = ctk.CTkFrame(cols, fg_color="transparent")
+        col_der.pack(side="left", fill="both", expand=True, padx=(10, 0))
+
+        ctk.CTkLabel(col_izq, text="Todos los Pedidos", font=(self.F_BODY, 14, "bold"), text_color=ACCENT_ICE).pack(anchor="w", pady=(0, 6))
+        self.banco_pedidos_scroll = ctk.CTkScrollableFrame(col_izq, fg_color="#0d111c", corner_radius=10)
+        self.banco_pedidos_scroll.pack(fill="both", expand=True)
+        self.bind_mousewheel_recursive(self.banco_pedidos_scroll, self.banco_pedidos_scroll, orient="y")
+
+        ctk.CTkLabel(col_der, text="Compras con Profit", font=(self.F_BODY, 14, "bold"), text_color=ACCENT_GOLD).pack(anchor="w", pady=(0, 6))
+        self.banco_compras_scroll = ctk.CTkScrollableFrame(col_der, fg_color="#0d111c", corner_radius=10)
+        self.banco_compras_scroll.pack(fill="both", expand=True)
+        self.bind_mousewheel_recursive(self.banco_compras_scroll, self.banco_compras_scroll, orient="y")
+
+        self.refrescar_banco_tab()
+
+    def refrescar_banco_tab(self):
+        if not hasattr(self, "banco_pedidos_scroll") or not self.banco_pedidos_scroll.winfo_exists():
+            return
+        for w in self.banco_pedidos_scroll.winfo_children():
+            w.destroy()
+        for w in self.banco_compras_scroll.winfo_children():
+            w.destroy()
+
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''SELECT nombre, cantidad, tier, valor_oc, estado, fecha FROM banco_items
+                     WHERE user_id = ? ORDER BY id DESC LIMIT 80''', (self.current_user_id,))
+        pedidos = c.fetchall()
+        c.execute('''SELECT nombre, cantidad, precio_mn, profit_total, fecha FROM banco_items
+                     WHERE user_id = ? AND estado != '✕ Cancelado' ORDER BY id DESC LIMIT 80''', (self.current_user_id,))
+        compras = c.fetchall()
+        conn.close()
+
+        if not pedidos:
+            ctk.CTkLabel(self.banco_pedidos_scroll, text="Todavía no pediste nada. Cuando exportes o archives una carga, va a aparecer acá.",
+                         font=(self.F_BODY, 12), text_color="#97a2bd", wraplength=380, justify="left").pack(pady=10, padx=8, anchor="w")
+        for nombre, cantidad, tier, valor_oc, estado, fecha in pedidos:
+            linea = ctk.CTkLabel(self.banco_pedidos_scroll,
+                                  text=f"{fecha} · {estado} · {nombre} x{cantidad} ({tier}) — base {int(valor_oc):,} silver",
+                                  font=(self.F_MONO, 11), text_color="#eef1f8", anchor="w")
+            linea.pack(fill="x", padx=8, pady=2)
+            self.bind_mousewheel_recursive(linea, self.banco_pedidos_scroll, orient="y")
+
+        if not compras:
+            ctk.CTkLabel(self.banco_compras_scroll, text="Todavía no hay compras con profit registradas.",
+                         font=(self.F_BODY, 12), text_color="#97a2bd", wraplength=380, justify="left").pack(pady=10, padx=8, anchor="w")
+        for nombre, cantidad, precio_mn, profit_total, fecha in compras:
+            color = "#3ddc84" if profit_total >= 0 else "#ef5350"
+            linea = ctk.CTkLabel(self.banco_compras_scroll,
+                                  text=f"{fecha} · {nombre} x{cantidad} — venta {int(precio_mn):,}/u · profit {int(profit_total):,} silver",
+                                  font=(self.F_MONO, 11, "bold"), text_color=color, anchor="w")
+            linea.pack(fill="x", padx=8, pady=2)
+            self.bind_mousewheel_recursive(linea, self.banco_compras_scroll, orient="y")
+
+    # ------------------------------------------------------------------ #
+    # PÁGINA: FAVORITOS
+    # ------------------------------------------------------------------ #
+    def build_tab_favoritos(self, parent):
+        ctk.CTkLabel(parent, text="Tus Favoritos", font=(self.F_DISPLAY, 18, "bold"), text_color=ACCENT_GOLD).pack(pady=(10, 4), padx=10, anchor="w")
+        ctk.CTkLabel(parent, text="Los ítems que marcaste con estrella (a mano, o automático si los compraste muchas veces), con lo que te dieron de ganancia.",
+                     font=(self.F_BODY, 13), text_color="#97a2bd", justify="left", wraplength=900).pack(padx=10, pady=(0, 10), anchor="w")
+
+        btn_refrescar_fav = ctk.CTkButton(parent, text="Refrescar", width=110, fg_color="#1e2536", hover_color=ACCENT_GOLD,
+                                           text_color="#eef1f8", font=(self.F_BODY, 12, "bold"), command=self.refrescar_favoritos_tab)
+        btn_refrescar_fav.pack(anchor="w", padx=10, pady=(0, 10))
+
+        self.favoritos_scroll = ctk.CTkScrollableFrame(parent, fg_color="#0d111c", corner_radius=10)
+        self.favoritos_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+        self.bind_mousewheel_recursive(self.favoritos_scroll, self.favoritos_scroll, orient="y")
+
+        self.refrescar_favoritos_tab()
+
+    def refrescar_favoritos_tab(self):
+        if not hasattr(self, "favoritos_scroll") or not self.favoritos_scroll.winfo_exists():
+            return
+        for w in self.favoritos_scroll.winfo_children():
+            w.destroy()
+
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''
+            SELECT nombre, SUM(cantidad), SUM(profit_total), AVG(profit_unidad), COUNT(*)
+            FROM banco_items WHERE user_id = ? AND favorito = 1
+            GROUP BY nombre ORDER BY SUM(profit_total) DESC
+        ''', (self.current_user_id,))
+        filas = c.fetchall()
+        conn.close()
+
+        if not filas:
+            ctk.CTkLabel(self.favoritos_scroll,
+                         text="Todavía no tenés favoritos con historial. Marcá la estrella en la tabla y exportá o archivá la carga, o compra el mismo ítem varias veces y la app lo marca sola.",
+                         font=(self.F_BODY, 13), text_color="#97a2bd", wraplength=800, justify="left").pack(pady=10, padx=8, anchor="w")
+            return
+
+        for nombre, total_cant, total_profit, avg_profit, veces in filas:
+            color = "#3ddc84" if total_profit >= 0 else "#ef5350"
+            card = ctk.CTkFrame(self.favoritos_scroll, fg_color="#1c2130", border_color=ACCENT_GOLD, border_width=1, corner_radius=10)
+            card.pack(fill="x", pady=4, padx=2)
+            ctk.CTkLabel(card, text=f"★ {nombre}", font=(self.F_DISPLAY, 14, "bold"), text_color=ACCENT_GOLD).pack(anchor="w", padx=12, pady=(10, 2))
+            ctk.CTkLabel(card, text=f"Comprado {veces} veces ({int(total_cant):,} unidades)",
+                         font=(self.F_BODY, 12), text_color="#97a2bd").pack(anchor="w", padx=12)
+            ctk.CTkLabel(card, text=f"Profit total: {int(total_profit):,} silver · Promedio/unidad: {int(avg_profit):,} silver",
+                         font=(self.F_MONO, 12, "bold"), text_color=color).pack(anchor="w", padx=12, pady=(2, 10))
+            self.bind_mousewheel_recursive(card, self.favoritos_scroll, orient="y")
+
+    # ------------------------------------------------------------------ #
+    # COMPARAR CUENTAS
     # ------------------------------------------------------------------ #
     def comparar_cuentas(self):
-        """
-        Suma el profit_final de historial_cargas agrupado por cada
-        personaje/región que hayas registrado en esta app y los muestra
-        ordenados de mayor a menor, para ver qué cuenta rinde más.
-        """
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         c.execute('''
@@ -2250,29 +2780,23 @@ class AlbionCargoApp(ctk.CTk):
         conn.close()
 
         if not filas:
-            messagebox.showinfo("Sin Cuentas", "No hay personajes registrados todavía.")
+            self.dialogo_info("Sin Cuentas", "No hay personajes registrados todavía.")
             return
 
         lineas = []
         for i, (username, region, total, cargas) in enumerate(filas, start=1):
-            marca = " ← Actual" if username == self.current_username and region == self.current_region else ""
+            marca = " (esta cuenta)" if username == self.current_username and region == self.current_region else ""
             lineas.append(f"{i}. {username} ({region}): {int(total):,} silver en {cargas} cargas archivadas{marca}")
-        messagebox.showinfo("👥 Comparación de Cuentas", "\n".join(lineas))
+        self.dialogo_info("Comparación de Cuentas", "\n".join(lineas))
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: EXPORTAR VISTA DE SOLO LECTURA PARA EL GREMIO
+    # VISTA DE SOLO LECTURA PARA EL GREMIO
     # ------------------------------------------------------------------ #
     def exportar_vista_gremio(self):
-        """
-        Genera un HTML autocontenido y de solo lectura con la ruta y los
-        números actuales de la carga, para compartir con tu gremio sin
-        exponer la contraseña ni dejarles editar nada -- es solo un
-        archivo estático que cualquiera puede abrir en el navegador.
-        """
         if not self.row_inputs:
-            messagebox.showwarning("Nada que exportar", "No hay ítems cargados para compartir.")
+            self.dialogo_warning("Nada que exportar", "No hay ítems cargados para compartir.")
             return
-        self.sync_and_calc()
+        self.calculate_metrics()
         m = self.last_metrics
 
         filas_html = ""
@@ -2321,12 +2845,12 @@ th {{ color:#97a2bd; }}
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(html)
-            messagebox.showinfo("Vista Exportada", f"Archivo guardado exitosamente en:\n{filename}\n\nSe puede abrir con cualquier navegador, sin necesidad de la app ni tu contraseña.")
+            self.dialogo_info("Vista Exportada", f"Archivo guardado exitosamente en:\n{filename}\n\nSe puede abrir con cualquier navegador, sin necesidad de la app ni tu contraseña.")
         except Exception as ex:
-            messagebox.showerror("Error", f"No se pudo exportar la vista:\n{ex}")
+            self.dialogo_error("Error", f"No se pudo exportar la vista:\n{ex}")
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: CHECKLIST PRE-VIAJE
+    # CHECKLIST PRE-VIAJE
     # ------------------------------------------------------------------ #
     CHECKLIST_ITEMS = [
         ("seguro_montura", "Seguro de Montura activo"),
@@ -2345,24 +2869,23 @@ th {{ color:#97a2bd; }}
 
         win = ctk.CTkToplevel(self)
         win.title("Checklist Pre-Viaje")
-        win.geometry("420x360")
         win.configure(fg_color="#12151f")
         win.attributes("-topmost", True)
+        win.resizable(False, False)
 
-        ctk.CTkLabel(win, text="✅ Antes de salir a Mercado Negro", font=(self.F_DISPLAY, 16, "bold"), text_color=ACCENT_LIME).pack(pady=(20, 10), padx=20, anchor="w")
+        ctk.CTkLabel(win, text="Antes de salir a Mercado Negro", font=(self.F_DISPLAY, 16, "bold"), text_color=ACCENT_LIME).pack(pady=(20, 10), padx=20, anchor="w")
 
-        vars_check = {}
         for key, texto in self.CHECKLIST_ITEMS:
             var = tk.BooleanVar(value=bool(estado_guardado.get(key, 0)))
             chk = ctk.CTkCheckBox(win, text=texto, variable=var, font=(self.F_BODY, 13),
                                    text_color="#eef1f8", fg_color=ACCENT_LIME, hover_color=ACCENT_TEAL,
                                    command=lambda k=key, v=var: self.guardar_checklist_item(k, v.get()))
             chk.pack(anchor="w", padx=30, pady=8)
-            vars_check[key] = var
 
         btn_cerrar = ctk.CTkButton(win, text="Cerrar", fg_color=ACCENT_LIME, text_color="#12141c",
                                     font=(self.F_BODY, 13, "bold"), command=win.destroy)
         btn_cerrar.pack(pady=20)
+        self._centrar_ventana(win, 420, 360)
 
     def guardar_checklist_item(self, item_key, checked):
         conn = sqlite3.connect(DB_NAME)
@@ -2375,136 +2898,74 @@ th {{ color:#97a2bd; }}
         conn.close()
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: MODO PRESENTACIÓN
+    # MODO PRESENTACIÓN
     # ------------------------------------------------------------------ #
     def toggle_modo_presentacion(self):
-        """
-        Oculta el nombre de personaje/región y bloquea toda la tabla de
-        ítems para compartir pantalla (ej. en un stream o con el gremio)
-        sin exponer datos que preferís mantener privados. No borra ni
-        cambia ningún valor, solo lo enmascara visualmente.
-        """
         self.modo_presentacion = not self.modo_presentacion
         if self.modo_presentacion:
             self._titulo_real_txt = self.ent_title.get()
             self.set_display_text(self.ent_title, "•••••• MODO PRESENTACIÓN ••••••")
-            self.btn_presentacion.configure(text="🕶 Salir de Presentación", fg_color=ACCENT_PINK)
+            self.btn_presentacion.configure(text="Salir de Presentación", fg_color=ACCENT_PINK)
             for row in self.row_inputs:
                 for campo in ("nombre", "cantidad", "tier", "valor_oc"):
                     row[campo].configure(state="readonly")
         else:
             self.set_display_text(self.ent_title, self._titulo_real_txt)
-            self.btn_presentacion.configure(text="🕶 Modo Presentación", fg_color="#1e2536")
+            self.btn_presentacion.configure(text="Modo Presentación", fg_color="#1e2536")
             for row in self.row_inputs:
                 for campo in ("nombre", "cantidad", "tier", "valor_oc"):
                     row[campo].configure(state="normal")
                 self.aplicar_bloqueo_precio_mn(row)
 
     # ------------------------------------------------------------------ #
-    # IDEA NUEVA: REQUISITOS DE ENCANTADO (Runas/Almas/Reliquias)
-    # ------------------------------------------------------------------ #
-    def build_tab_encantar(self, parent):
-        ctk.CTkLabel(parent, text="Requisitos de Encantado", font=(self.F_DISPLAY, 14, "bold"), text_color=ACCENT_GOLD).pack(pady=(10, 4), padx=5, anchor="w")
-        ctk.CTkLabel(parent, text="Costo de esencias (Runas + Almas + Reliquias)\nPOR CADA nivel de encantamiento (.1, .2, .3),\nsegún el tipo de pieza de equipo.",
-                     font=(self.F_BODY, 12), text_color="#97a2bd", justify="left").pack(padx=5, pady=(0, 10), anchor="w")
-
-        for nombre_cat, costo, color in ENCANTE_COSTOS:
-            card = ctk.CTkFrame(parent, fg_color="#0d111c", border_color=color, border_width=1, corner_radius=10)
-            card.pack(fill="x", padx=5, pady=5)
-            strip = ctk.CTkFrame(card, fg_color=color, height=3, corner_radius=0)
-            strip.pack(fill="x", side="top")
-            ctk.CTkLabel(card, text=nombre_cat, font=(self.F_BODY, 13, "bold"), text_color="#eef1f8", wraplength=380, justify="left").pack(anchor="w", padx=12, pady=(8, 2))
-            ctk.CTkLabel(card, text=f"{costo:,} Runas  +  {costo:,} Almas  +  {costo:,} Reliquias  (por nivel)",
-                         font=(self.F_MONO, 13, "bold"), text_color=color).pack(anchor="w", padx=12, pady=(0, 10))
-
-        # Calculadora rápida: cuántas esencias totales necesitás según
-        # cuántos niveles querés subir y cuántas piezas vas a encantar.
-        frame_calc = ctk.CTkFrame(parent, fg_color="#0d111c", corner_radius=10)
-        frame_calc.pack(fill="x", padx=5, pady=(15, 5))
-        ctk.CTkLabel(frame_calc, text="Calculadora Rápida", font=(self.F_BODY, 13, "bold"), text_color="#eef1f8").pack(anchor="w", padx=10, pady=(10, 4))
-
-        ctk.CTkLabel(frame_calc, text="Tipo de Equipo:", font=(self.F_BODY, 12, "bold"), text_color="#97a2bd").pack(anchor="w", padx=10, pady=(4, 2))
-        self.sel_encante_cat = ctk.CTkOptionMenu(
-            frame_calc, values=[c[0] for c in ENCANTE_COSTOS], command=lambda v: self.calcular_encantado(),
-            fg_color="#1e2536", button_color="#232a3c", button_hover_color="#38445c",
-            dropdown_fg_color="#12151f", dropdown_hover_color=ACCENT_GOLD, dropdown_text_color="#eef1f8",
-            font=(self.F_BODY, 12, "bold"))
-        self.sel_encante_cat.pack(fill="x", padx=10, pady=4)
-
-        ctk.CTkLabel(frame_calc, text="Niveles a subir (ej: 2 = de .0 a .2):", font=(self.F_BODY, 12, "bold"), text_color="#97a2bd").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_encante_niveles = ctk.CTkEntry(frame_calc, fg_color="#161a26", text_color="#eef1f8")
-        self.ent_encante_niveles.insert(0, "1")
-        self.ent_encante_niveles.pack(fill="x", padx=10, pady=4)
-        self.ent_encante_niveles.bind("<KeyRelease>", lambda e: self.calcular_encantado())
-
-        ctk.CTkLabel(frame_calc, text="Cantidad de Piezas:", font=(self.F_BODY, 12, "bold"), text_color="#97a2bd").pack(anchor="w", padx=10, pady=(8, 2))
-        self.ent_encante_piezas = ctk.CTkEntry(frame_calc, fg_color="#161a26", text_color="#eef1f8")
-        self.ent_encante_piezas.insert(0, "1")
-        self.ent_encante_piezas.pack(fill="x", padx=10, pady=(4, 10))
-        self.ent_encante_piezas.bind("<KeyRelease>", lambda e: self.calcular_encantado())
-
-        self.lbl_encante_resultado = ctk.CTkLabel(parent, text="", font=(self.F_MONO, 14, "bold"), text_color=ACCENT_GOLD, justify="left")
-        self.lbl_encante_resultado.pack(padx=5, pady=15, anchor="w")
-
-        self.calcular_encantado()
-
-    def calcular_encantado(self):
-        cat = self.sel_encante_cat.get()
-        costo_base = next((costo for nombre, costo, color in ENCANTE_COSTOS if nombre == cat), 0)
-        niveles = int(self.get_float(self.ent_encante_niveles.get()))
-        piezas = int(self.get_float(self.ent_encante_piezas.get()))
-        total = costo_base * max(niveles, 0) * max(piezas, 0)
-        self.lbl_encante_resultado.configure(
-            text=(f"Total necesario para {piezas} pieza(s), {niveles} nivel(es):\n"
-                  f"{total:,} Runas\n{total:,} Almas\n{total:,} Reliquias")
-        )
-
-    # ------------------------------------------------------------------ #
-    # CÁLCULOS
+    # CÁLCULOS (lee los ítems directo de la base de datos, así los
+    # contadores de arriba siempre están bien sin importar qué página
+    # tengas abierta en este momento)
     # ------------------------------------------------------------------ #
     def calculate_metrics(self):
+        if not hasattr(self, "card_budget"):
+            return
+
         tax_rate = 0.04 if self.is_premium else 0.08
-        ajuste_rate = 0.025   # Ajuste de mercado al vender en el Mercado Negro
-        setup_rate = 0.025    # Setup fee al comprar con Órdenes de Compra
+        ajuste_rate = 0.025
+        setup_rate = 0.025
 
         total_inversion_oc = 0.0
         total_venta_bruta = 0.0
 
-        val_mochila_manual = self.get_float(self.ent_mochila_global.get())
+        val_mochila_manual = self.get_float(self.ent_mochila_global.get()) if hasattr(self, "ent_mochila_global") else 0.0
 
-        for row in self.row_inputs:
-            status = row["status"].get()
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT status, cantidad, valor_oc, precio_mn FROM inventario WHERE user_id=? AND hub=? AND carga_nombre=?",
+                  (self.current_user_id, self.current_hub, self.current_carga))
+        filas_db = c.fetchall()
+        conn.close()
 
-            # Margen % por fila (idea nueva): se calcula para TODAS las filas
-            # (incluidas canceladas, en gris) para que sea un vistazo rápido
-            # de qué tan rentable es cada ítem puntual.
-            valor_oc_fila = self.get_float(row["valor_oc"].get())
-            precio_mn_fila = self.get_float(row["precio_mn"].get())
-            lbl_margen = row.get("lbl_margen")
-            if lbl_margen is not None and lbl_margen.winfo_exists():
-                if status == "✕ Cancelado":
-                    lbl_margen.configure(text="---", text_color="#97a2bd")
-                elif valor_oc_fila <= 0:
-                    lbl_margen.configure(text="---", text_color="#97a2bd")
-                else:
-                    costo_unit = valor_oc_fila * (1 + setup_rate)
-                    venta_neta_unit = precio_mn_fila * (1 - tax_rate - ajuste_rate)
-                    margen_pct = ((venta_neta_unit - costo_unit) / costo_unit) * 100
-                    color_margen = "#3ddc84" if margen_pct >= 0 else "#ef5350"
-                    lbl_margen.configure(text=f"{margen_pct:.0f}%", text_color=color_margen)
-
-            if status == "✕ Cancelado":
+        for status, cantidad, valor_oc, precio_mn in filas_db:
+            if status == "canceled":
                 continue
-
-            cantidad = int(self.get_float(row["cantidad"].get()))
-            if cantidad == 0:
-                cantidad = 1
-
-            valor_oc = self.get_float(row["valor_oc"].get())
-            precio_mn = self.get_float(row["precio_mn"].get())
-
+            cantidad = int(cantidad) or 1
             total_inversion_oc += (cantidad * valor_oc * (1 + setup_rate))
             total_venta_bruta += (cantidad * precio_mn)
+
+        # Si la página "Mi Carga" está abierta, también actualizamos el %
+        # margen que se muestra al lado de cada fila.
+        if getattr(self, "row_inputs", None):
+            for row in self.row_inputs:
+                status = row["status"].get()
+                valor_oc_fila = self.get_float(row["valor_oc"].get())
+                precio_mn_fila = self.get_float(row["precio_mn"].get())
+                lbl_margen = row.get("lbl_margen")
+                if lbl_margen is not None and lbl_margen.winfo_exists():
+                    if status == "✕ Cancelado" or valor_oc_fila <= 0:
+                        lbl_margen.configure(text="---", text_color="#97a2bd")
+                    else:
+                        costo_unit = valor_oc_fila * (1 + setup_rate)
+                        venta_neta_unit = precio_mn_fila * (1 - tax_rate - ajuste_rate)
+                        margen_pct = ((venta_neta_unit - costo_unit) / costo_unit) * 100
+                        color_margen = "#3ddc84" if margen_pct >= 0 else "#ef5350"
+                        lbl_margen.configure(text=f"{margen_pct:.0f}%", text_color=color_margen)
 
         total_impuesto = total_venta_bruta * tax_rate
         total_ajuste = total_venta_bruta * ajuste_rate
@@ -2521,6 +2982,7 @@ th {{ color:#97a2bd; }}
             self.set_display_text(self.card_status, "---", "#eef1f8")
 
         costo_transporte = self.get_float(self.ent_costo_transporte.get()) if hasattr(self, "ent_costo_transporte") else 0.0
+        impuesto_retorno = self.get_float(self.ent_impuesto_retorno.get()) if hasattr(self, "ent_impuesto_retorno") else 0.0
 
         if self.current_destino == DESTINO_HIDEOUT:
             self.card_pt_label.configure(text="COSTO TOTAL DE TRANSPORTE (Uso Personal a Hideout)")
@@ -2529,45 +2991,50 @@ th {{ color:#97a2bd; }}
                 text=("Carga con destino Hideout: no se vende en el Mercado Negro. "
                       f"Costo de transporte registrado: {int(costo_transporte):,} silver.")
             )
-            profit_final_real = -costo_transporte
+            profit_final_real = -costo_transporte - impuesto_retorno
         else:
             tax_pct = int(round(tax_rate * 100))
             self.card_pt_label.configure(text=f"PROFIT FINAL MERCADO NEGRO (-{tax_pct}% Imp. -2.5% Ajuste)")
-            profit_final_real = total_venta_neta - total_inversion_oc
+            profit_final_real = total_venta_neta - total_inversion_oc - impuesto_retorno
 
-            # Punto de equilibrio (idea nueva): cuánta Venta Bruta necesitás
-            # para no perder plata, dado el impuesto + ajuste actuales. Es
-            # pura matemática con tus propios números, sin depender de nada
-            # externo.
             factor_neto = (1 - tax_rate - ajuste_rate)
             venta_equilibrio = (total_inversion_oc / factor_neto) if factor_neto > 0 else 0.0
 
             if self.fase_venta_activa:
                 self.set_display_text(self.card_pt, f"{int(profit_final_real):,} silver", "#3ddc84" if profit_final_real >= 0 else "#ef5350")
+                extra_retorno = f"  |  Retorno rápido: -{int(impuesto_retorno):,} silver" if impuesto_retorno > 0 else ""
                 self.lbl_desglose.configure(
                     text=(f"Venta Bruta: {int(total_venta_bruta):,}  |  "
                           f"-{tax_pct}% Impuesto: -{int(total_impuesto):,}  |  "
                           f"-2.5% Ajuste: -{int(total_ajuste):,}  |  "
-                          f"Neto: {int(total_venta_neta):,} silver  |  "
-                          f"⚖ Punto de Equilibrio (Venta Bruta mínima): {int(venta_equilibrio):,} silver")
+                          f"Neto: {int(total_venta_neta):,} silver{extra_retorno}  |  "
+                          f"Punto de Equilibrio (Venta Bruta mínima): {int(venta_equilibrio):,} silver")
                 )
             else:
                 self.set_display_text(self.card_pt, "---", "#3ddc84")
                 self.lbl_desglose.configure(
-                    text=(f"Activa la fase de venta para ver el desglose de impuestos y ajuste.  |  "
-                          f"⚖ Punto de Equilibrio estimado (Venta Bruta mínima): {int(venta_equilibrio):,} silver")
+                    text=(f"Activá la fase de venta para ver el desglose de impuestos y ajuste.  |  "
+                          f"Punto de Equilibrio estimado (Venta Bruta mínima): {int(venta_equilibrio):,} silver")
                 )
 
-        # Eficiencia: silver por hora desde que arrancó "Inicio Carga/Compra"
-        # (idea nueva, bonus propio). Usa el profit que corresponda según el
-        # destino de la carga (Mercado Negro o costo de transporte a Hideout).
+        if hasattr(self, "lbl_premium_ahorro") and self.lbl_premium_ahorro.winfo_exists():
+            ahorro_premium = total_venta_bruta * 0.04
+            if self.is_premium:
+                self.lbl_premium_ahorro.configure(
+                    text=f"Con Premium activo, en esta carga te ahorrás como {int(ahorro_premium):,} silver de impuesto (pagás 4% en vez de 8%)."
+                )
+            else:
+                self.lbl_premium_ahorro.configure(
+                    text=f"Sin Premium estás pagando el doble de impuesto. Si lo activaras, en esta carga te ahorrarías como {int(ahorro_premium):,} silver."
+                )
+
         if hasattr(self, "lbl_eficiencia") and hasattr(self, "ent_start_time"):
             try:
                 inicio_dt = datetime.strptime(self.ent_start_time.get().strip(), "%Y-%m-%d %H:%M")
                 horas_transcurridas = max((datetime.now() - inicio_dt).total_seconds() / 3600, 0.1)
                 eficiencia = profit_final_real / horas_transcurridas
                 color_efi = "#3ddc84" if eficiencia >= 0 else "#ef5350"
-                self.lbl_eficiencia.configure(text=f"⚡ Eficiencia: {int(eficiencia):,} silver/hora", text_color=color_efi)
+                self.lbl_eficiencia.configure(text=f"Eficiencia: {int(eficiencia):,} silver/hora", text_color=color_efi)
             except Exception:
                 self.lbl_eficiencia.configure(text="")
 
@@ -2586,6 +3053,7 @@ th {{ color:#97a2bd; }}
             "costo_transporte": costo_transporte,
             "premium": self.is_premium,
             "tax_rate": tax_rate,
+            "impuesto_retorno": impuesto_retorno,
         }
 
     # ------------------------------------------------------------------ #
@@ -2593,7 +3061,7 @@ th {{ color:#97a2bd; }}
     # ------------------------------------------------------------------ #
     def export_to_pdf(self):
         if not self.row_inputs:
-            messagebox.showwarning("PDF Vacío", "No hay datos en la tabla para exportar.")
+            self.dialogo_warning("PDF Vacío", "No hay datos en la tabla para exportar.")
             return
 
         self.sync_and_calc()
@@ -2604,7 +3072,6 @@ th {{ color:#97a2bd; }}
             initialfile=f"Carga{self.current_hub.replace(' ', '_')}.pdf",
             filetypes=[("Archivos PDF", "*.pdf")]
         )
-
         if not filename:
             return
 
@@ -2634,8 +3101,7 @@ th {{ color:#97a2bd; }}
             if y - needed < BOTTOM_MARGIN:
                 c.showPage()
                 draw_page_background()
-                new_y = h - 50
-                return new_y
+                return h - 50
             return y
 
         def draw_section_title(y, text):
@@ -2652,21 +3118,20 @@ th {{ color:#97a2bd; }}
 
         c.setFillColorRGB(1, 0.66, 0)
         c.setFont("Helvetica-Bold", 16)
-        c.drawString(40, h - 50, f"REPORTE DE CARGA: {self.current_hub.upper()} -> {self.current_destino.upper()}")
+        c.drawString(40, h - 50, f"Mi carga: {self.current_hub} -> {self.current_destino}")
 
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.7, 0.8)
-        c.drawString(40, h - 75, f"Nombre: {self.current_username}   |   Servidor: {self.current_region}")
+        c.drawString(40, h - 75, f"{self.current_username}  -  {self.current_region}")
 
         c.setFillColorRGB(1, 1, 1)
-        c.drawString(40, h - 100, f"REGISTRO INICIO LOGÍSTICA: {start_str} (Local)  /  {start_utc}")
-        c.drawString(40, h - 115, f"REPORTE GENERADO: {generado_str} (Local)")
-        estado_fase = "VENTA MERCADO NEGRO ACTIVA" if self.last_metrics.get("fase_venta_activa") else "FASE DE COMPRA (Venta aún no iniciada)"
-        c.drawString(40, h - 130, f"ESTADO DE LA CARGA: {estado_fase}")
+        c.drawString(40, h - 100, f"Arranque la compra: {start_str} (hora local)  /  {start_utc}")
+        c.drawString(40, h - 115, f"Este reporte lo saque el: {generado_str}")
+        estado_fase = "Ya estoy vendiendo en el Mercado Negro" if self.last_metrics.get("fase_venta_activa") else "Todavia en fase de compra (no empece a vender)"
+        c.drawString(40, h - 130, f"Estado: {estado_fase}")
 
         y = h - 160
-
-        y = draw_section_title(y, "RESUMEN FINANCIERO GENERAL")
+        y = draw_section_title(y, "Como me fue con la plata")
         m = self.last_metrics
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(1, 1, 1)
@@ -2676,27 +3141,27 @@ th {{ color:#97a2bd; }}
             ruta_txt += f" ({m['ruta_tipo']})"
 
         resumen_lines = [
-            f"Cuenta Premium: {'Sí (Impuesto Mercado Negro 4%)' if m['premium'] else 'No (Impuesto Mercado Negro 8%)'}",
+            f"Premium: {'Si, pago menos impuesto (4%)' if m['premium'] else 'No, impuesto normal (8%)'}",
             f"Ruta: {ruta_txt}  ->  {m['destino']}",
-            f"Inversión Órdenes de Compra (+2.5% Setup): {int(m['inversion']):,} silver",
-            f"Valor Declarado Mochila: {int(m['mochila']):,} silver",
-            f"Profit Estimado (Mochila - Inversión): {int(m['profit_est']):,} silver",
+            f"Lo que puse en Ordenes de Compra (+2.5% de setup): {int(m['inversion']):,} silver",
+            f"Lo que anote que vale mi mochila: {int(m['mochila']):,} silver",
+            f"Profit estimado (mochila menos inversion): {int(m['profit_est']):,} silver",
         ]
 
         if m['destino'] == DESTINO_HIDEOUT:
             resumen_lines += [
                 "",
-                "Esta carga tiene destino Hideout (uso personal): no se vende en el Mercado Negro.",
-                f"Costo de Transporte Registrado: {int(m['costo_transporte']):,} silver",
+                "Esta carga va para el Hideout (uso personal), no se vende en el Mercado Negro.",
+                f"Lo que gaste en transporte: {int(m['costo_transporte']):,} silver",
             ]
         else:
             tax_pct = int(round(m['tax_rate'] * 100))
             resumen_lines += [
-                f"Venta Bruta Proyectada en Mercado Negro: {int(m['venta_bruta']):,} silver",
-                f"  -{tax_pct}% Impuesto Mercado Negro: -{int(m['impuesto']):,} silver",
-                f"  -2.5% Ajuste de Mercado: -{int(m['ajuste']):,} silver",
-                f"Venta Neta: {int(m['venta_neta']):,} silver",
-                f"Profit Final Mercado Negro (Venta Neta - Inversión): {int(m['profit_final']):,} silver",
+                f"Venta bruta proyectada en el Mercado Negro: {int(m['venta_bruta']):,} silver",
+                f"  -{tax_pct}% de impuesto: -{int(m['impuesto']):,} silver",
+                f"  -2.5% de ajuste de mercado: -{int(m['ajuste']):,} silver",
+                f"Venta neta: {int(m['venta_neta']):,} silver",
+                f"Profit final (venta neta menos inversion): {int(m['profit_final']):,} silver",
             ]
 
         for line in resumen_lines:
@@ -2705,14 +3170,13 @@ th {{ color:#97a2bd; }}
             y -= 16
 
         y -= 10
-
-        y = draw_section_title(y, "CARGA DE ÍTEMS (incluye cancelados)")
+        y = draw_section_title(y, "Mis items (los cancelados tambien quedan anotados)")
 
         def draw_table_headers(y):
             c.setFillColorRGB(1, 0.66, 0)
             c.setFont("Helvetica-Bold", 9)
             c.drawString(40, y, "Estado")
-            c.drawString(115, y, "Ítem")
+            c.drawString(115, y, "Item")
             c.drawString(300, y, "Cant.")
             c.drawString(335, y, "Tier")
             c.drawString(375, y, "Costo Compra O/C")
@@ -2735,7 +3199,7 @@ th {{ color:#97a2bd; }}
             costo_oc_total = valor_oc_raw * 1.025
             venta_mn_total = precio_mn_raw * (1 - 0.105) if not self.is_premium else precio_mn_raw * (1 - 0.065)
 
-            fav_marca = "★ " if row["favorito"]["on"] else ""
+            fav_marca = "* " if row["favorito"]["on"] else ""
 
             c.setFillColorRGB(1, 0.3, 0.3) if cancelado else c.setFillColorRGB(1, 1, 1)
             c.drawString(40, y, status)
@@ -2754,8 +3218,14 @@ th {{ color:#97a2bd; }}
 
         c.setFillColorRGB(1, 1, 1)
         y -= 10
+        y = draw_section_title(y, "Cuantas esencias tengo guardadas")
 
-        y = draw_section_title(y, "REFINO / PRECIOS DE ESENCIAS")
+        conn = sqlite3.connect(DB_NAME)
+        cq = conn.cursor()
+        cq.execute("SELECT tier, runas, almas, reliquias FROM esencias WHERE user_id=? AND hub=? ORDER BY tier", (self.current_user_id, self.current_hub))
+        filas_esencias = {t: (r, a, re) for t, r, a, re in cq.fetchall()}
+        conn.close()
+
         c.setFont("Helvetica-Bold", 9)
         c.setFillColorRGB(1, 0.66, 0)
         c.drawString(40, y, "Tier")
@@ -2767,9 +3237,7 @@ th {{ color:#97a2bd; }}
         c.setFillColorRGB(1, 1, 1)
         for t in range(4, 9):
             y = ensure_space(y, 16)
-            r = self.essence_inputs[f"r_t{t}"].get()
-            a = self.essence_inputs[f"a_t{t}"].get()
-            re = self.essence_inputs[f"re_t{t}"].get()
+            r, a, re = filas_esencias.get(t, (0, 0, 0))
             c.drawString(40, y, f"T{t}")
             c.drawString(120, y, str(r))
             c.drawString(220, y, str(a))
@@ -2777,9 +3245,15 @@ th {{ color:#97a2bd; }}
             y -= 16
 
         y -= 10
+        y = draw_section_title(y, "Notas mias")
 
-        y = draw_section_title(y, "NOTAS Extras")
-        nota_texto = self.txt_notes.get("1.0", "end-1c").strip()
+        conn = sqlite3.connect(DB_NAME)
+        cq = conn.cursor()
+        cq.execute("SELECT texto FROM notas WHERE user_id=? AND hub=?", (self.current_user_id, self.current_hub))
+        fila_nota = cq.fetchone()
+        conn.close()
+        nota_texto = (fila_nota[0] if fila_nota else "").strip()
+
         c.setFont("Helvetica", 9)
         c.setFillColorRGB(1, 1, 1)
         if nota_texto:
@@ -2791,24 +3265,26 @@ th {{ color:#97a2bd; }}
                     y -= 14
         else:
             y = ensure_space(y, 14)
-            c.drawString(40, y, "(Sin notas registradas para este hub)")
+            c.drawString(40, y, "(No anote nada para esta ciudad)")
             y -= 14
 
         c.save()
 
-        # Al exportar el PDF también archivamos automáticamente la carga al
-        # historial, así el historial se llena solo con cada reporte generado.
         try:
             self.archivar_carga_silenciosa()
         except Exception:
             pass
 
-        messagebox.showinfo("Carga Exportada", f"Archivo guardado exitosamente en:\n{filename}")
-        # CAMBIO PEDIDO #5: exportar PDF reinicia la hora de Inicio Carga/Compra.
+        self.dialogo_info("Carga Exportada", f"Archivo guardado exitosamente en:\n{filename}")
+        self.vaciar_carga_actual()
+        if self.pagina_actual == "🏦 Banco":
+            self.refrescar_banco_tab()
+        if self.pagina_actual == "★ Favoritos":
+            self.refrescar_favoritos_tab()
         self.reiniciar_inicio_carga()
 
     def archivar_carga_silenciosa(self):
-        """Igual que archivar_carga() pero sin popup, usada al exportar PDF."""
+        self.calculate_metrics()
         m = self.last_metrics
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -2817,10 +3293,11 @@ th {{ color:#97a2bd; }}
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (self.current_user_id, self.current_hub, self.current_destino,
               datetime.now().strftime("%Y-%m-%d %H:%M"), m["inversion"], m["venta_neta"], m["profit_final"]))
-        self._guardar_snapshot_items(cursor, cursor.lastrowid)
+        self._guardar_snapshot_banco(cursor)
         conn.commit()
         conn.close()
-        self.refresh_historial_tab()
+        if self.pagina_actual == "📊 Historial":
+            self.refresh_historial_tab()
 
 
 if __name__ == "__main__":
